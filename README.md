@@ -50,6 +50,24 @@ Vor dem Speichern zeigt die App eine Vorschau mit allen Monaten und allen nicht 
 Importierte Tage enthalten nur die Dauer. Bei Überschneidung mit der eigenen Erfassung zählt
 standardmäßig der Import. Ob Krank- und Urlaubstage mitzählen, ist einstellbar.
 
+## Abgleich mit dem Stundenzettel der Firma
+
+Nach dem Import eines Monats öffnet sich der Tab **Abgleich**. Dort wird jeder Tag der Firmendaten
+mit der eigenen Erfassung verglichen:
+
+| Status | Bedeutung |
+|---|---|
+| stimmt | Dauer gleich (innerhalb der Toleranz, Standard ±5 min) |
+| Abweichung | eigene Dauer und Firmen-Dauer unterscheiden sich |
+| fehlt bei Firma | selbst erfasst, aber nicht im Stundenzettel |
+| nur bei Firma | im Stundenzettel, aber nichts selbst erfasst |
+| eigene Erfassung unvollständig | Kommen ohne Gehen |
+| krank/Urlaub laut Firma | Bemerkung im Stundenzettel, keine eigene Erfassung |
+
+Dazu gibt es die Monatssummen beider Seiten, einen Filter „Nur Auffälligkeiten“ und einen CSV-Export
+des Abgleichs (z. B. zum Weitergeben an die Personalabteilung). Die Firmendaten enthalten nur die
+Dauer je Tag, deshalb wird die Dauer verglichen, nicht die Uhrzeit.
+
 ## Installation
 
 1. **Einmalig: Signatur-Schlüssel als GitHub-Secrets hinterlegen**

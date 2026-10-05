@@ -99,6 +99,11 @@ class Settings private constructor(context: Context) {
 
     val evalOptions: EvalOptions get() = EvalOptions(preferImport, countAbsence)
 
+    /** Abweichungen bis zu dieser Minutenzahl gelten beim Abgleich als übereinstimmend. */
+    var reconcileToleranceMinutes: Int
+        get() = prefs.getInt("reconcile_tolerance_min", 5)
+        set(v) = edit { putInt("reconcile_tolerance_min", v) }
+
     // ---------- Werkstudent ----------
     var studentEnabled: Boolean
         get() = prefs.getBoolean("student_enabled", true)

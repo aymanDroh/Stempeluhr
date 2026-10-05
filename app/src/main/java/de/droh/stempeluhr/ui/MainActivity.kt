@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
@@ -36,6 +37,7 @@ import de.droh.stempeluhr.engine.Notifications
 import de.droh.stempeluhr.engine.StampEngine
 import de.droh.stempeluhr.nfc.NfcTags
 import de.droh.stempeluhr.service.MonitorService
+import java.time.YearMonth
 
 class MainActivity : ComponentActivity() {
 
@@ -129,6 +131,7 @@ private fun App(
     onCancelTagWrite: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var reconcileMonth by rememberSaveable { mutableStateOf<String?>(null) }
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -151,10 +154,16 @@ private fun App(
                     label = { Text("Wochen") },
                 )
                 NavigationBarItem(
+                    selected = tab == 4,
+                    onClick = { tab = 4 },
+                    icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
+                    label = { Text("Abgleich") },
+                )
+                NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
                     icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text("Einstellungen") },
+                    label = { Text("Optionen") },
                 )
             }
         },
@@ -164,7 +173,19 @@ private fun App(
             0 -> TodayScreen(modifier, resumeCount, onOpenSettings = { tab = 2 }, onOpenWeeks = { tab = 3 })
             1 -> HistoryScreen(modifier)
             3 -> WeeksScreen(modifier)
-            else -> SettingsScreen(modifier, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite)
+            4 -> ReconcileScreen(
+                modifier,
+                month = reconcileMonth?.let { YearMonth.parse(it) },
+                onMonthChange = { reconcileMonth = it.toString() },
+                onImport = { tab = 2 },
+            )
+            else -> SettingsScreen(
+                modifier, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite,
+                onImported = { month ->
+                    if (month != null) reconcileMonth = month.toString()
+                    tab = 4
+                },
+            )
         }
     }
 }

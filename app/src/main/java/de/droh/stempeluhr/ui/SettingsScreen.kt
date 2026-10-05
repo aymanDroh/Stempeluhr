@@ -69,6 +69,7 @@ import de.droh.stempeluhr.engine.StampEngine
 import de.droh.stempeluhr.geo.GeofenceManager
 import de.droh.stempeluhr.service.MonitorService
 import java.time.LocalDate
+import java.time.YearMonth
 import java.util.Locale
 
 /** Prüft, was für die automatische Erfassung noch fehlt. */
@@ -106,6 +107,7 @@ fun SettingsScreen(
     tagWriteMode: StampEngine.Mode?,
     onStartTagWrite: (StampEngine.Mode) -> Unit,
     onCancelTagWrite: () -> Unit,
+    onImported: (YearMonth?) -> Unit,
 ) {
     val context = LocalContext.current
     val (settings, settingsVersion) = rememberSettings()
@@ -123,7 +125,7 @@ fun SettingsScreen(
         NfcSection(settings, settingsVersion, tagWriteMode, onStartTagWrite, onCancelTagWrite)
         EvaluationSection(settings, settingsVersion)
         StudentSection(settings, settingsVersion)
-        ImportSection(settings, settingsVersion)
+        ImportSection(settings, settingsVersion, onImported)
         ExportSection(settings)
         Text(
             "Hinweis: Alle Daten liegen nur auf diesem Handy. Vor dem Deinstallieren oder Handywechsel " +
@@ -581,7 +583,7 @@ private fun StudentSection(settings: Settings, settingsVersion: Long) {
 private class ImportPreview(val fileName: String, val result: ImportResult, val replaced: Int, val existingRaw: Int)
 
 @Composable
-private fun ImportSection(settings: Settings, settingsVersion: Long) {
+private fun ImportSection(settings: Settings, settingsVersion: Long, onImported: (YearMonth?) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val imported by rememberImportedDays()
@@ -643,12 +645,41 @@ private fun ImportSection(settings: Settings, settingsVersion: Long) {
             settings.preferImport = it
         }
         SwitchRow("Krank-/Urlaubstage aus dem Import mitzählen", settings.countAbsence) { settings.countAbsence = it }
+        var tolerance by remember(settingsVersion) { mutableStateOf(settings.reconcileToleranceMinutes.toString()) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = tolerance,
+                onValueChange = { tolerance = it.filter(Char::isDigit) },
+                label = { Text("Toleranz beim Abgleich (Minuten)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = {
+                val t = tolerance.toIntOrNull()
+                if (t == null || t > 120) {
+                    Toast.makeText(context, "Ungültige Eingabe.", Toast.LENGTH_SHORT).show()
+                } else {
+                    settings.reconcileToleranceMinutes = t
+                    Toast.makeText(context, "Gespeichert.", Toast.LENGTH_SHORT).show()
+                }
+            }) { Text("OK") }
+        }
         if (imported.isNotEmpty()) {
             TextButton(onClick = { confirmDeleteAll = true }) { Text("Alle importierten Tage löschen") }
         }
     }
 
-    preview?.let { p -> ImportPreviewDialog(p, onDismiss = { preview = null }) }
+    preview?.let { p ->
+        ImportPreviewDialog(
+            p,
+            onDismiss = { preview = null },
+            onImported = {
+                preview = null
+                onImported(p.result.days.lastOrNull()?.let { YearMonth.from(it.date) })
+            },
+        )
+    }
 
     if (confirmDeleteAll) {
         AlertDialog(
@@ -667,7 +698,7 @@ private fun ImportSection(settings: Settings, settingsVersion: Long) {
 }
 
 @Composable
-private fun ImportPreviewDialog(p: ImportPreview, onDismiss: () -> Unit) {
+private fun ImportPreviewDialog(p: ImportPreview, onDismiss: () -> Unit, onImported: () -> Unit) {
     val context = LocalContext.current
     val r = p.result
     AlertDialog(
@@ -728,7 +759,7 @@ private fun ImportPreviewDialog(p: ImportPreview, onDismiss: () -> Unit) {
                     "Importiert: ${r.days.size} Tage" + if (r.rawRows.isNotEmpty()) ", $added Ereignisse" else "",
                     Toast.LENGTH_LONG,
                 ).show()
-                onDismiss()
+                if (r.days.isNotEmpty()) onImported() else onDismiss()
             }) { Text("Importieren") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
