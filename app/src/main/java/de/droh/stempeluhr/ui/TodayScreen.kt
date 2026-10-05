@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,8 +35,9 @@ import de.droh.stempeluhr.data.StampDb
 import de.droh.stempeluhr.engine.StampEngine
 import java.time.LocalDate
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TodayScreen(modifier: Modifier, resumeCount: Int, onOpenSettings: () -> Unit) {
+fun TodayScreen(modifier: Modifier, resumeCount: Int, onOpenSettings: () -> Unit, onOpenWeeks: () -> Unit) {
     val context = LocalContext.current
     val events by rememberAllEvents()
     val (settings, settingsVersion) = rememberSettings()
@@ -72,6 +74,28 @@ fun TodayScreen(modifier: Modifier, resumeCount: Int, onOpenSettings: () -> Unit
                     }
                     setupIssues.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                     TextButton(onClick = onOpenSettings) { Text("Zu den Einstellungen") }
+                }
+            }
+        }
+
+        // ---------- Werkstudent ----------
+        if (settings.studentEnabled) {
+            val report = rememberStudentReport()
+            val limitH = TimeFormat.hm(report.limitMinutes.toLong())
+            val w = report.currentWeek
+            Card(onClick = onOpenWeeks, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SmallLabel("Werkstudent (26-Wochen-Regel)")
+                    Text(
+                        "Noch ${report.remainingWeeks.coerceAtLeast(0)} von ${report.limitWeeks} Wochen über $limitH h erlaubt",
+                        fontWeight = FontWeight.Bold,
+                        color = if (report.remainingWeeks <= 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        "Diese Woche: ${TimeFormat.hm(w.minutes)} h · " +
+                            if (w.over) "zählt bereits" else "noch ${TimeFormat.hm(report.currentWeekMinutesLeft)} h bis $limitH h",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }

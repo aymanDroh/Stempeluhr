@@ -3,6 +3,8 @@ package de.droh.stempeluhr.data
 import android.content.Context
 import android.content.SharedPreferences
 import de.droh.stempeluhr.core.AutoState
+import de.droh.stempeluhr.core.EvalOptions
+import de.droh.stempeluhr.core.StudentRule
 import de.droh.stempeluhr.core.StampSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,6 +86,31 @@ class Settings private constructor(context: Context) {
     var notifyOnStamp: Boolean
         get() = prefs.getBoolean("notify_on_stamp", true)
         set(v) = edit { putBoolean("notify_on_stamp", v) }
+
+    /** Bei Überschneidung zählt der Import (Firmendaten) statt der eigenen Erfassung. */
+    var preferImport: Boolean
+        get() = prefs.getBoolean("prefer_import", true)
+        set(v) = edit { putBoolean("prefer_import", v) }
+
+    /** Krank-/Urlaubstage aus dem Import mit ihrer Dauer mitzählen. */
+    var countAbsence: Boolean
+        get() = prefs.getBoolean("count_absence", true)
+        set(v) = edit { putBoolean("count_absence", v) }
+
+    val evalOptions: EvalOptions get() = EvalOptions(preferImport, countAbsence)
+
+    // ---------- Werkstudent ----------
+    var studentEnabled: Boolean
+        get() = prefs.getBoolean("student_enabled", true)
+        set(v) = edit { putBoolean("student_enabled", v) }
+
+    var studentLimitWeeks: Int
+        get() = prefs.getInt("student_limit_weeks", StudentRule.DEFAULT_LIMIT_WEEKS)
+        set(v) = edit { putInt("student_limit_weeks", v) }
+
+    var studentLimitMinutes: Int
+        get() = prefs.getInt("student_limit_minutes", StudentRule.DEFAULT_LIMIT_MINUTES)
+        set(v) = edit { putInt("student_limit_minutes", v) }
 
     var showDeleted: Boolean
         get() = prefs.getBoolean("show_deleted", false)

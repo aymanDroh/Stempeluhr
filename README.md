@@ -24,6 +24,32 @@ erfunden, sondern die Lücke bleibt sichtbar und kann manuell nachgetragen werde
 Korrekturen ändern die Zeit, die ursprüngliche Zeit bleibt gespeichert. Löschen markiert nur.
 Beides ist im Rohdaten-Export nachvollziehbar.
 
+## Werkstudent: 26-Wochen-Regel
+
+Der Tab **Wochen** zählt rollierend über die letzten 52 Kalenderwochen (Mo–So), in wie vielen Wochen
+mehr als 20 Stunden (brutto) gearbeitet wurde, und zeigt:
+
+- wie viele Wochen über 20 h noch erlaubt sind (Standard: 26)
+- die aktuelle Woche und wie viele Stunden noch gehen, bevor sie zählt
+- wann welche Woche aus dem Zeitraum fällt, also wann wieder eine Woche frei wird
+- alle 52 Wochen einzeln
+
+Wochen in den Semesterferien zählen genauso mit. Grenze und Wochenzahl sind in den Einstellungen
+änderbar.
+
+## Import
+
+*Einstellungen → Import → Datei importieren*:
+
+- **Stundenzettel als PDF** (Datum + Dauer je Tag, optional Bemerkung wie „krank“). Die Monatssumme
+  aus der Datei wird zur Kontrolle mit den gelesenen Tagen verglichen.
+- **CSV** mit Spalten `Datum` und `Dauer` (h:mm), optional `Bemerkung`.
+- **Rohdaten-Export dieser App:** stellt alle Ereignisse wieder her, z. B. nach einem Handywechsel.
+
+Vor dem Speichern zeigt die App eine Vorschau mit allen Monaten und allen nicht verstandenen Zeilen.
+Importierte Tage enthalten nur die Dauer. Bei Überschneidung mit der eigenen Erfassung zählt
+standardmäßig der Import. Ob Krank- und Urlaubstage mitzählen, ist einstellbar.
+
 ## Installation
 
 1. **Einmalig: Signatur-Schlüssel als GitHub-Secrets hinterlegen**

@@ -74,6 +74,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // PDF-Text auslesen für den Import von Stundenzetteln
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     testImplementation("junit:junit:4.13.2")
 }

@@ -51,7 +51,7 @@ object CsvExport {
                     listOf(
                         "Datum", "Wochentag", "Kommen", "Quelle Kommen", "Gehen", "Quelle Gehen",
                         "Dauer (h:mm)", "Dauer (Stunden)", "Soll (h:mm)", "Saldo (h:mm)",
-                    ) + sourceHeaders
+                    ) + sourceHeaders + listOf("Import (h:mm)", "Import Bemerkung", "Dauer aus")
                     ).toTypedArray(),
             ),
         )
@@ -78,7 +78,15 @@ object CsvExport {
                             duration?.let { TimeFormat.decimalHours(it) }.orEmpty(),
                             if (duration != null) TimeFormat.hm(targetMinutes.toLong()) else "",
                             d.saldoMinutes(targetMinutes)?.let { TimeFormat.signedHm(it) }.orEmpty(),
-                        ) + sourceCols
+                        ) + sourceCols + listOf(
+                            d.imported?.let { TimeFormat.hm(it.minutes) }.orEmpty(),
+                            d.imported?.note.orEmpty(),
+                            when {
+                                duration == null -> ""
+                                d.durationFromImport -> "Import"
+                                else -> "Erfassung"
+                            },
+                        )
                         ).toTypedArray(),
                 ),
             )

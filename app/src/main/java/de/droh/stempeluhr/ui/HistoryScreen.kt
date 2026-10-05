@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,20 +42,25 @@ private data class DayEntry(val summary: DaySummary, val shownEvents: List<Stamp
 fun HistoryScreen(modifier: Modifier) {
     val context = LocalContext.current
     val events by rememberAllEvents()
+    val imported by rememberImportedDays()
     val (settings, settingsVersion) = rememberSettings()
     val priority = remember(settingsVersion) { settings.priority }
     val target = remember(settingsVersion) { settings.targetMinutes }
     val showDeleted = remember(settingsVersion) { settings.showDeleted }
+    val options = remember(settingsVersion) { settings.evalOptions }
     val dialogs = remember { EventDialogs() }
     var expanded by remember { mutableStateOf(setOf<String>()) }
 
-    val days = remember(events, priority, showDeleted) {
-        events.groupBy { Summary.localDate(it.ts, zone) }
-            .map { (date, list) ->
-                val summary = Summary.forDay(date, list, priority)
+    val days = remember(events, imported, priority, showDeleted, options) {
+        val byDate = events.groupBy { Summary.localDate(it.ts, zone) }
+        val importByDate = imported.associateBy { it.date }
+        (byDate.keys + importByDate.keys)
+            .map { date ->
+                val list = byDate[date].orEmpty()
+                val summary = Summary.forDay(date, list, priority, importByDate[date], options)
                 DayEntry(summary, if (showDeleted) list.sortedBy { it.ts } else summary.events)
             }
-            .filter { it.shownEvents.isNotEmpty() }
+            .filter { it.shownEvents.isNotEmpty() || it.summary.imported != null }
             .sortedByDescending { it.summary.date }
     }
     val months = remember(days) { days.groupBy { YearMonth.from(it.summary.date) } }
@@ -79,7 +85,7 @@ fun HistoryScreen(modifier: Modifier) {
                 Column(Modifier.padding(top = 8.dp)) {
                     Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "${total.days} Tage mit Kommen und Gehen · Summe ${TimeFormat.hm(total.minutes)} h · " +
+                        "${total.days} Tage mit Dauer · Summe ${TimeFormat.hm(total.minutes)} h · " +
                             "Saldo ${TimeFormat.signedHm(total.saldoMinutes)} h (Soll ${TimeFormat.hm(target.toLong())}/Tag)",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -94,6 +100,7 @@ fun HistoryScreen(modifier: Modifier) {
                     onToggle = { expanded = if (key in expanded) expanded - key else expanded + key },
                     dialogs = dialogs,
                     onRestore = { StampDb.get(context).setDeleted(it.id, false) },
+                    onDeleteImport = { StampDb.get(context).deleteImported(entry.summary.date) },
                 )
             }
         }
@@ -109,6 +116,7 @@ private fun DayCard(
     onToggle: () -> Unit,
     dialogs: EventDialogs,
     onRestore: (StampEvent) -> Unit,
+    onDeleteImport: () -> Unit,
 ) {
     val d = entry.summary
     Card(Modifier.fillMaxWidth()) {
@@ -135,6 +143,11 @@ private fun DayCard(
                 listOfNotNull(
                     d.kommen?.let { "Kommen: ${it.source.label}" },
                     d.gehen?.let { "Gehen: ${it.source.label}" },
+                    d.imported?.let { imp ->
+                        "Import: ${TimeFormat.hm(imp.minutes)} h" +
+                            (imp.note?.let { " ($it)" } ?: "") +
+                            (if (d.durationFromImport) " – gewertet" else "")
+                    },
                 ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -161,6 +174,9 @@ private fun DayCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.IN }) { Text("+ Kommen") }
                     OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.OUT }) { Text("+ Gehen") }
+                }
+                if (d.imported != null) {
+                    TextButton(onClick = onDeleteImport) { Text("Importierten Eintrag dieses Tages entfernen") }
                 }
             }
         }

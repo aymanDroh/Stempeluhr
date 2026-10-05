@@ -5,15 +5,18 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import de.droh.stempeluhr.core.ImportedDay
+import de.droh.stempeluhr.core.RawRow
 import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.StampType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.LocalDate
 
 /** Lokale SQLite-Datenbank mit allen Stempel-Ereignissen. */
 class StampDb private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "stempel.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "stempel.db", null, 2) {
 
     private val _changes = MutableStateFlow(0L)
 
@@ -36,9 +39,111 @@ class StampDb private constructor(context: Context) :
             """.trimIndent(),
         )
         db.execSQL("CREATE INDEX idx_events_ts ON events(ts)")
+        createImportTable(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createImportTable(db)
+    }
+
+    private fun createImportTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS imported_days (
+                date TEXT PRIMARY KEY,
+                minutes INTEGER NOT NULL,
+                note TEXT,
+                source TEXT,
+                imported_at INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+    }
+
+    // ---------- Importierte Tage (nur Dauer bekannt) ----------
+
+    /** Speichert importierte Tage; vorhandene Tage mit gleichem Datum werden ersetzt. */
+    @Synchronized
+    fun upsertImported(days: List<ImportedDay>, sourceName: String?) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val now = System.currentTimeMillis()
+            for (d in days) {
+                val values = ContentValues().apply {
+                    put("date", d.date.toString())
+                    put("minutes", d.minutes)
+                    put("note", d.note)
+                    put("source", sourceName)
+                    put("imported_at", now)
+                }
+                db.insertWithOnConflict("imported_days", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        notifyChanged()
+    }
+
+    @Synchronized
+    fun importedDays(): List<ImportedDay> =
+        readableDatabase.query("imported_days", null, null, null, null, null, "date ASC").use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val noteIdx = c.getColumnIndexOrThrow("note")
+                    add(
+                        ImportedDay(
+                            date = LocalDate.parse(c.getString(c.getColumnIndexOrThrow("date"))),
+                            minutes = c.getLong(c.getColumnIndexOrThrow("minutes")),
+                            note = if (c.isNull(noteIdx)) null else c.getString(noteIdx),
+                        ),
+                    )
+                }
+            }
+        }
+
+    @Synchronized
+    fun deleteImported(date: LocalDate) {
+        writableDatabase.delete("imported_days", "date = ?", arrayOf(date.toString()))
+        notifyChanged()
+    }
+
+    @Synchronized
+    fun deleteAllImported() {
+        writableDatabase.delete("imported_days", null, null)
+        notifyChanged()
+    }
+
+    /** Stellt Ereignisse aus dem eigenen Rohdaten-Export wieder her. Bereits vorhandene werden übersprungen. */
+    @Synchronized
+    fun restoreRaw(rows: List<RawRow>): Int {
+        val existing = all(includeDeleted = true).map { Triple(it.ts, it.type, it.source) }.toHashSet()
+        val db = writableDatabase
+        var added = 0
+        db.beginTransaction()
+        try {
+            for (r in rows) {
+                if (Triple(r.ts, r.type, r.source) in existing) continue
+                val values = ContentValues().apply {
+                    put("ts", r.ts)
+                    put("type", r.type.name)
+                    put("source", r.source.name)
+                    put("note", r.note)
+                    put("created_at", System.currentTimeMillis())
+                    if (r.originalTs != null) put("original_ts", r.originalTs)
+                    put("deleted", if (r.deleted) 1 else 0)
+                }
+                db.insert("events", null, values)
+                added++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        notifyChanged()
+        return added
+    }
 
     @Synchronized
     fun insert(ts: Long, type: StampType, source: StampSource, note: String? = null): Long {

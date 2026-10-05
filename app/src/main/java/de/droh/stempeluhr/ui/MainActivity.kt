@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -140,8 +141,14 @@ private fun App(
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                     label = { Text("Verlauf") },
+                )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
+                    label = { Text("Wochen") },
                 )
                 NavigationBarItem(
                     selected = tab == 2,
@@ -154,8 +161,9 @@ private fun App(
     ) { padding ->
         val modifier = Modifier.padding(padding)
         when (tab) {
-            0 -> TodayScreen(modifier, resumeCount, onOpenSettings = { tab = 2 })
+            0 -> TodayScreen(modifier, resumeCount, onOpenSettings = { tab = 2 }, onOpenWeeks = { tab = 3 })
             1 -> HistoryScreen(modifier)
+            3 -> WeeksScreen(modifier)
             else -> SettingsScreen(modifier, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite)
         }
     }

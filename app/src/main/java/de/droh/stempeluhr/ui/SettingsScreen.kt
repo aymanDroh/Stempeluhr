@@ -45,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import de.droh.stempeluhr.core.CsvExport
+import de.droh.stempeluhr.core.ImportParser
+import de.droh.stempeluhr.core.ImportResult
+import de.droh.stempeluhr.core.TimeFormat
+import de.droh.stempeluhr.data.ImportReader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import de.droh.stempeluhr.core.Summary
 import de.droh.stempeluhr.data.Settings
 import de.droh.stempeluhr.data.StampDb
@@ -114,6 +122,8 @@ fun SettingsScreen(
         GeoSection(settings, settingsVersion)
         NfcSection(settings, settingsVersion, tagWriteMode, onStartTagWrite, onCancelTagWrite)
         EvaluationSection(settings, settingsVersion)
+        StudentSection(settings, settingsVersion)
+        ImportSection(settings, settingsVersion)
         ExportSection(settings)
         Text(
             "Hinweis: Alle Daten liegen nur auf diesem Handy. Vor dem Deinstallieren oder Handywechsel " +
@@ -491,7 +501,8 @@ private fun ExportSection(settings: Settings) {
     }
     val dailyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
-            val days = Summary.byDay(StampDb.get(context).all(includeDeleted = false), zone, settings.priority)
+            val db = StampDb.get(context)
+            val days = Summary.byDay(db.all(includeDeleted = false), zone, settings.priority, db.importedDays(), settings.evalOptions)
             writeText(context, uri, CsvExport.daily(days, settings.targetMinutes, zone))
         }
     }
@@ -516,4 +527,210 @@ private fun writeText(context: Context, uri: Uri, text: String) {
     } catch (e: Exception) {
         Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun StudentSection(settings: Settings, settingsVersion: Long) {
+    val context = LocalContext.current
+    var weeks by remember(settingsVersion) { mutableStateOf(settings.studentLimitWeeks.toString()) }
+    var hours by remember(settingsVersion) {
+        mutableStateOf(settings.studentLimitMinutes.let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" })
+    }
+    Section("Werkstudent (26-Wochen-Regel)") {
+        Text(
+            "Zählt rollierend über die letzten 52 Kalenderwochen (Mo–So), wie viele Wochen über der Stundengrenze lagen " +
+                "(Brutto-Dauer, eigene Erfassung und Import, auch Semesterferien).",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        SwitchRow("Anzeige auf \"Heute\"", settings.studentEnabled) { settings.studentEnabled = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = weeks,
+                onValueChange = { weeks = it.filter(Char::isDigit) },
+                label = { Text("Max. Wochen") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = hours,
+                onValueChange = { hours = it },
+                label = { Text("Grenze (h:mm)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Button(onClick = {
+            val w = weeks.toIntOrNull()
+            val m = ImportParser.parseHm(hours) ?: hours.toIntOrNull()?.let { it * 60L }
+            if (w == null || w !in 1..52 || m == null || m !in 60..7 * 24 * 60) {
+                Toast.makeText(context, "Ungültige Eingabe.", Toast.LENGTH_SHORT).show()
+            } else {
+                settings.studentLimitWeeks = w
+                settings.studentLimitMinutes = m.toInt()
+                Toast.makeText(context, "Gespeichert.", Toast.LENGTH_SHORT).show()
+            }
+        }) { Text("Speichern") }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+private class ImportPreview(val fileName: String, val result: ImportResult, val replaced: Int, val existingRaw: Int)
+
+@Composable
+private fun ImportSection(settings: Settings, settingsVersion: Long) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val imported by rememberImportedDays()
+    var busy by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<ImportPreview?>(null) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
+
+    val openLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            try {
+                val p = withContext(Dispatchers.IO) {
+                    val db = StampDb.get(context)
+                    val name = ImportReader.fileName(context, uri)
+                    val result = ImportParser.parse(ImportReader.readText(context, uri), zone)
+                    val existingDates = db.importedDays().map { it.date }.toSet()
+                    val existingRaw = db.all(includeDeleted = true).map { Triple(it.ts, it.type, it.source) }.toSet()
+                    ImportPreview(
+                        fileName = name,
+                        result = result,
+                        replaced = result.days.count { it.date in existingDates },
+                        existingRaw = result.rawRows.count { Triple(it.ts, it.type, it.source) in existingRaw },
+                    )
+                }
+                if (p.result.isEmpty) {
+                    Toast.makeText(context, "In der Datei wurden keine Arbeitszeiten gefunden.", Toast.LENGTH_LONG).show()
+                } else {
+                    preview = p
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Import fehlgeschlagen: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    Section("Import") {
+        Text(
+            "Stundenzettel als PDF oder CSV (Datum + Dauer je Tag, optional Bemerkung wie \"krank\") oder der " +
+                "Rohdaten-Export dieser App (Wiederherstellung). Ein erneuter Import ersetzt Tage mit gleichem Datum.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Button(enabled = !busy, onClick = {
+            openLauncher.launch(arrayOf("application/pdf", "text/*", "application/csv", "application/vnd.ms-excel"))
+        }) { Text(if (busy) "Lese Datei …" else "Datei importieren") }
+        Text(
+            if (imported.isEmpty()) {
+                "Noch keine importierten Tage."
+            } else {
+                "${imported.size} importierte Tage (${TimeFormat.date(imported.first().date)} – " +
+                    "${TimeFormat.date(imported.last().date)}), Summe ${TimeFormat.hm(imported.sumOf { it.minutes })} h"
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        HorizontalDivider()
+        SwitchRow("Bei Überschneidung zählt der Import (statt eigener Erfassung)", settings.preferImport) {
+            settings.preferImport = it
+        }
+        SwitchRow("Krank-/Urlaubstage aus dem Import mitzählen", settings.countAbsence) { settings.countAbsence = it }
+        if (imported.isNotEmpty()) {
+            TextButton(onClick = { confirmDeleteAll = true }) { Text("Alle importierten Tage löschen") }
+        }
+    }
+
+    preview?.let { p -> ImportPreviewDialog(p, onDismiss = { preview = null }) }
+
+    if (confirmDeleteAll) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAll = false },
+            title = { Text("Alle importierten Tage löschen?") },
+            text = { Text("Eigene Erfassungen (WLAN, Standort, NFC, manuell) bleiben erhalten.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    StampDb.get(context).deleteAllImported()
+                    confirmDeleteAll = false
+                }) { Text("Löschen") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteAll = false }) { Text("Abbrechen") } },
+        )
+    }
+}
+
+@Composable
+private fun ImportPreviewDialog(p: ImportPreview, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val r = p.result
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Import prüfen") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(p.fileName, style = MaterialTheme.typography.bodySmall)
+                if (r.days.isNotEmpty()) {
+                    Text(
+                        "${r.days.size} Arbeitstage von ${TimeFormat.date(r.days.first().date)} bis " +
+                            "${TimeFormat.date(r.days.last().date)}, Summe ${TimeFormat.hm(r.days.sumOf { it.minutes })} h",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (p.replaced > 0) Text("${p.replaced} davon ersetzen bereits importierte Tage.")
+                    val absences = r.days.filter { it.isAbsence }
+                    if (absences.isNotEmpty()) {
+                        Text("${absences.size} Tage mit Krank/Urlaub: " + absences.joinToString { "${TimeFormat.shortDate(it.date)} ${it.note}" })
+                    }
+                    HorizontalDivider()
+                    SmallLabel("Kontrolle je Monat (Summe laut Datei / gelesen)")
+                    r.checks.forEach { c ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Bullet(c.ok != false)
+                            Text(
+                                "${TimeFormat.month(c.month.atDay(1))}: " +
+                                    "${c.statedMinutes?.let { TimeFormat.hm(it) } ?: "–"} / ${TimeFormat.hm(c.parsedMinutes)} h" +
+                                    if (c.ok == null) " (keine Summe in Datei)" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                if (r.rawRows.isNotEmpty()) {
+                    Text(
+                        "${r.rawRows.size} Ereignisse aus Rohdaten-Export, davon ${p.existingRaw} schon vorhanden " +
+                            "(werden übersprungen).",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (r.skippedLines.isNotEmpty()) {
+                    HorizontalDivider()
+                    SmallLabel("Nicht verstandene Zeilen (${r.skippedLines.size})")
+                    r.skippedLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val db = StampDb.get(context)
+                if (r.days.isNotEmpty()) db.upsertImported(r.days, p.fileName)
+                val added = if (r.rawRows.isNotEmpty()) db.restoreRaw(r.rawRows) else 0
+                Toast.makeText(
+                    context,
+                    "Importiert: ${r.days.size} Tage" + if (r.rawRows.isNotEmpty()) ", $added Ereignisse" else "",
+                    Toast.LENGTH_LONG,
+                ).show()
+                onDismiss()
+            }) { Text("Importieren") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }

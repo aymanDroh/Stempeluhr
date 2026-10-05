@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import de.droh.stempeluhr.core.ImportedDay
 import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.StampType
@@ -62,6 +63,16 @@ fun rememberAllEvents(): State<List<StampEvent>> {
     val version by db.changes.collectAsState()
     return produceState<List<StampEvent>>(initialValue = emptyList(), version) {
         value = withContext(Dispatchers.IO) { db.all(includeDeleted = true) }
+    }
+}
+
+/** Alle importierten Tage; lädt bei jeder Änderung der Datenbank neu. */
+@Composable
+fun rememberImportedDays(): State<List<ImportedDay>> {
+    val db = StampDb.get(LocalContext.current)
+    val version by db.changes.collectAsState()
+    return produceState<List<ImportedDay>>(initialValue = emptyList(), version) {
+        value = withContext(Dispatchers.IO) { db.importedDays() }
     }
 }
 
