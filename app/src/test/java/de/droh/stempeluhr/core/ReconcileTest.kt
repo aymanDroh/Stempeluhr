@@ -59,4 +59,17 @@ class ReconcileTest {
         assertTrue(csv.contains("02.09.2026;Mi;7:00;;8:00;08:00;WLAN;16:00;WLAN;+1:00;Abweichung"))
         assertTrue(csv.contains("Summe;"))
     }
+
+    @Test
+    fun bestaetigteMonateVerschwindenBisSichDatenAendern() {
+        val m = YearMonth.of(2026, 9)
+        val imported = listOf(ImportedDay(LocalDate.of(2026, 9, 1), 8 * 60, null))
+        val days = Summary.byDay(emptyList(), zone, StampSource.DEFAULT_PRIORITY, imported)
+        assertEquals(listOf(m), Reconcile.openMonths(days, 5, emptyMap()))
+        val fp = Reconcile.fingerprint(Reconcile.compare(days, m, 5))
+        assertEquals(emptyList<YearMonth>(), Reconcile.openMonths(days, 5, mapOf(m to fp)))
+        // Neuer Import mit anderer Dauer -> Monat ist wieder offen.
+        val changed = Summary.byDay(emptyList(), zone, StampSource.DEFAULT_PRIORITY, listOf(ImportedDay(LocalDate.of(2026, 9, 1), 7 * 60, null)))
+        assertEquals(listOf(m), Reconcile.openMonths(changed, 5, mapOf(m to fp)))
+    }
 }

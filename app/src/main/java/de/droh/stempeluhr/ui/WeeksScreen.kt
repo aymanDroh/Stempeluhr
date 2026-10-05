@@ -1,24 +1,46 @@
 package de.droh.stempeluhr.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import de.droh.stempeluhr.core.StudentReport
@@ -50,135 +72,226 @@ fun weekRange(w: WeekStat): String = "${TimeFormat.shortDate(w.weekStart)}–${T
 fun WeeksScreen(modifier: Modifier) {
     val report = rememberStudentReport()
     val limitH = TimeFormat.hm(report.limitMinutes.toLong())
-    val danger = report.remainingWeeks <= 0
-    val warnColor = Color(0xFFC62828)
-    val okColor = Color(0xFF2E7D32)
+    val remaining = report.remainingWeeks.coerceAtLeast(0)
+    val ringColor = when {
+        report.remainingWeeks <= 0 -> App.colors.bad
+        report.remainingWeeks <= 3 -> App.colors.warn
+        else -> App.colors.good
+    }
+    var showAll by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = if (danger) {
-                    CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-                } else {
-                    CardDefaults.cardColors()
-                },
-            ) {
-                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    SmallLabel("Werkstudent: Wochen über $limitH h")
-                    Text(
-                        "${report.remainingWeeks.coerceAtLeast(0)}",
-                        style = MaterialTheme.typography.displayLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (danger) warnColor else okColor,
-                    )
-                    Text(
-                        if (danger) {
-                            "Grenze erreicht oder überschritten: ${report.overWeeks} von ${report.limitWeeks} Wochen"
-                        } else {
-                            "Wochen dürfen noch über $limitH h liegen"
-                        },
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "${report.overWeeks} von ${report.limitWeeks} Wochen über $limitH h im Zeitraum " +
-                            "${TimeFormat.date(report.windowStart)} – ${TimeFormat.date(report.today)} (52 Kalenderwochen rückwärts)",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        }
+        item { ScreenHeader("Wochen", "Werkstudent · 26-Wochen-Regel") }
 
         item {
-            val w = report.currentWeek
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SmallLabel("Diese Woche (${kw(w)}, ${weekRange(w)})")
-                    Text("${TimeFormat.hm(w.minutes)} h gearbeitet", style = MaterialTheme.typography.titleLarge)
-                    if (w.over) {
-                        Text("Zählt bereits als Woche über $limitH h.", color = warnColor, fontWeight = FontWeight.SemiBold)
-                    } else {
-                        Text("Noch ${TimeFormat.hm(report.currentWeekMinutesLeft)} h, bis diese Woche über $limitH h zählt.")
-                    }
-                    if (w.incompleteDays > 0) {
-                        Text(
-                            "${w.incompleteDays} Tag(e) ohne Gehen zählen mit 0 h – bitte nachtragen.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = warnColor,
-                        )
-                    }
-                    Text(
-                        "Der heutige Tag zählt erst, wenn ein Gehen erfasst ist.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        }
-
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SmallLabel("Wann wird wieder eine Woche frei?")
-                    val releases = report.upcomingReleases
-                    if (releases.isEmpty()) {
-                        Text("Keine Woche über $limitH h im Zeitraum.")
-                    } else {
-                        Text(
-                            "Jede Woche über $limitH h fällt 52 Wochen nach ihrem Montag aus dem Zeitraum heraus (ohne weitere Wochen über der Grenze gerechnet):",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        releases.forEachIndexed { i, w ->
-                            Row {
-                                Text("ab ${TimeFormat.date(w.dropsOutOn)}", Modifier.weight(0.4f), fontWeight = FontWeight.SemiBold)
+            Appear(0) {
+                AppCard {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        ProgressRing(
+                            progress = remaining / report.limitWeeks.toFloat().coerceAtLeast(1f),
+                            color = ringColor,
+                            size = 180.dp,
+                            stroke = 16.dp,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                RollingText("$remaining", style = MaterialTheme.typography.displayLarge, color = ringColor)
                                 Text(
-                                    "${kw(w)} (${weekRange(w)}): ${TimeFormat.hm(w.minutes)} h → dann ${report.remainingWeeks + i + 1} frei",
-                                    Modifier.weight(0.6f),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    "von ${report.limitWeeks} frei",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            if (report.remainingWeeks <= 0) "Grenze erreicht" else "Wochen dürfen noch über $limitH h liegen",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (report.remainingWeeks <= 0) App.colors.bad else MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            "${report.overWeeks} Wochen über $limitH h seit ${TimeFormat.date(report.windowStart)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
         }
 
         item {
-            Text(
-                "Alle 52 Wochen im Zeitraum",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Text(
-                "Gezählt wird die Brutto-Dauer je Kalenderwoche (Mo–So), aus eigener Erfassung und Import. " +
-                    "Auch Wochen in den Semesterferien zählen mit.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Appear(1) {
+                val w = report.currentWeek
+                AppCard {
+                    CardTitle("Diese Woche · ${kw(w)}")
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        RollingText(TimeFormat.hm(w.minutes), style = MaterialTheme.typography.displayMedium)
+                        Text(
+                            " / $limitH h",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                    ProgressBar(
+                        w.minutes / report.limitMinutes.toFloat().coerceAtLeast(1f),
+                        if (w.over) App.colors.bad else MaterialTheme.colorScheme.primary,
+                        height = 12.dp,
+                    )
+                    Text(
+                        if (w.over) {
+                            "Diese Woche zählt bereits als Woche über $limitH h."
+                        } else {
+                            "Noch ${TimeFormat.hm(report.currentWeekMinutesLeft)} h, bis diese Woche zählt."
+                        },
+                        color = if (w.over) App.colors.bad else MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (w.incompleteDays > 0) {
+                        Pill("${w.incompleteDays} Tag(e) ohne Gehen – zählen mit 0 h", App.colors.warn)
+                    }
+                    Text(
+                        "Der heutige Tag zählt, sobald ein Gehen erfasst ist.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
-        items(report.weeks, key = { it.weekStart.toString() }) { w ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(kw(w), Modifier.weight(0.18f), fontWeight = FontWeight.SemiBold)
-                Text(weekRange(w), Modifier.weight(0.42f), style = MaterialTheme.typography.bodySmall)
-                Text(
-                    "${TimeFormat.hm(w.minutes)} h",
-                    Modifier.weight(0.2f),
-                    color = if (w.over) warnColor else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = if (w.over) FontWeight.Bold else FontWeight.Normal,
-                )
-                Text(
-                    when {
-                        w.over -> "> $limitH h"
-                        w.incompleteDays > 0 -> "unvollst."
-                        else -> ""
-                    },
-                    Modifier.weight(0.2f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (w.over) warnColor else MaterialTheme.colorScheme.outline,
+
+        item {
+            Appear(2) {
+                AppCard {
+                    CardTitle("Letzte 52 Wochen")
+                    WeekChart(report)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Legend(App.colors.bad, "über $limitH h")
+                        Spacer(Modifier.width(16.dp))
+                        Legend(MaterialTheme.colorScheme.primary, "bis $limitH h")
+                    }
+                }
+            }
+        }
+
+        item {
+            Appear(3) {
+                AppCard {
+                    CardTitle("Wann wird wieder eine Woche frei?")
+                    val releases = report.upcomingReleases
+                    if (releases.isEmpty()) {
+                        Text("Keine Woche über $limitH h im Zeitraum.")
+                    }
+                    releases.forEachIndexed { i, w ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(TimeFormat.date(w.dropsOutOn), style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "${kw(w)} (${weekRange(w)}) · ${TimeFormat.hm(w.minutes)} h",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Pill("dann ${report.remainingWeeks + i + 1} frei", App.colors.good)
+                        }
+                    }
+                    if (releases.isNotEmpty()) {
+                        Text(
+                            "Gerechnet ohne weitere Wochen über der Grenze.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Appear(4) {
+                AppCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CardTitle("Alle 52 Wochen", Modifier.weight(1f))
+                        TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Ausblenden" else "Anzeigen") }
+                    }
+                    AnimatedVisibility(showAll, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            report.weeks.forEach { w -> WeekRow(w, limitH) }
+                        }
+                    }
+                    Text(
+                        "Gezählt wird die Brutto-Dauer je Kalenderwoche (Mo–So) aus eigener Erfassung und Import – " +
+                            "auch in den Semesterferien.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekRow(w: WeekStat, limitH: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(kw(w), Modifier.width(64.dp), fontWeight = FontWeight.SemiBold)
+        Text(weekRange(w), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "${TimeFormat.hm(w.minutes)} h",
+            style = MaterialTheme.typography.bodyMedium.merge(TabularNumbers),
+            fontWeight = if (w.over) FontWeight.Bold else FontWeight.Normal,
+            color = if (w.over) App.colors.bad else MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.width(76.dp), contentAlignment = Alignment.CenterEnd) {
+            when {
+                w.over -> Pill("> $limitH h", App.colors.bad)
+                w.incompleteDays > 0 -> Pill("unvollst.", App.colors.warn)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Legend(color: androidx.compose.ui.graphics.Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Balkendiagramm der 52 Wochen (älteste links), mit gestrichelter Grenzlinie. */
+@Composable
+private fun WeekChart(report: StudentReport) {
+    val weeks = report.weeks.reversed()
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(report.weeks) { anim.snapTo(0f); anim.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
+    val over = App.colors.bad
+    val normal = MaterialTheme.colorScheme.primary
+    val limitColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val maxMinutes = maxOf(weeks.maxOfOrNull { it.minutes } ?: 0L, report.limitMinutes * 3L / 2).toFloat()
+    Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+        val gap = 2.dp.toPx()
+        val barW = (size.width - gap * (weeks.size - 1)) / weeks.size
+        weeks.forEachIndexed { i, w ->
+            val h = size.height * (w.minutes / maxMinutes) * anim.value
+            if (w.minutes > 0) {
+                drawRoundRect(
+                    color = if (w.over) over else normal.copy(alpha = 0.55f),
+                    topLeft = Offset(i * (barW + gap), size.height - h),
+                    size = Size(barW, h),
+                    cornerRadius = CornerRadius(barW / 2, barW / 2),
                 )
             }
         }
+        val y = size.height - size.height * (report.limitMinutes / maxMinutes)
+        drawLine(
+            limitColor,
+            Offset(0f, y),
+            Offset(size.width, y),
+            strokeWidth = 1.5.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f)),
+        )
     }
 }

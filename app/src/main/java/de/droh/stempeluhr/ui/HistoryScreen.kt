@@ -1,6 +1,19 @@
 package de.droh.stempeluhr.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,44 +80,75 @@ fun HistoryScreen(modifier: Modifier) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Gelöschte Einträge anzeigen", Modifier.weight(1f))
-                Switch(checked = showDeleted, onCheckedChange = { settings.showDeleted = it })
+                Box(Modifier.weight(1f)) { ScreenHeader("Verlauf", "${days.size} Tage") }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Gelöschte", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Switch(checked = showDeleted, onCheckedChange = { settings.showDeleted = it })
+                }
             }
         }
         if (days.isEmpty()) {
-            item { Text("Noch keine Einträge vorhanden.") }
+            item {
+                EmptyState(
+                    "Noch keine Einträge",
+                    "Sobald etwas erfasst oder importiert ist, erscheint es hier – nach Monaten sortiert.",
+                )
+            }
         }
+        var index = 0
         months.forEach { (month, monthDays) ->
+            val i = index++
             item(key = "m$month") {
-                val total = Summary.total(monthDays.map { it.summary }, target)
-                Column(Modifier.padding(top = 8.dp)) {
-                    Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "${total.days} Tage mit Dauer · Summe ${TimeFormat.hm(total.minutes)} h · " +
-                            "Saldo ${TimeFormat.signedHm(total.saldoMinutes)} h (Soll ${TimeFormat.hm(target.toLong())}/Tag)",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                Appear(i) { MonthHeader(month, monthDays.map { it.summary }, target) }
             }
             items(monthDays, key = { it.summary.date.toString() }) { entry ->
                 val key = entry.summary.date.toString()
-                DayCard(
-                    entry = entry,
-                    target = target,
-                    expanded = key in expanded,
-                    onToggle = { expanded = if (key in expanded) expanded - key else expanded + key },
-                    dialogs = dialogs,
-                    onRestore = { StampDb.get(context).setDeleted(it.id, false) },
-                    onDeleteImport = { StampDb.get(context).deleteImported(entry.summary.date) },
-                )
+                Box(Modifier.animateItem()) {
+                    DayCard(
+                        entry = entry,
+                        target = target,
+                        expanded = key in expanded,
+                        onToggle = { expanded = if (key in expanded) expanded - key else expanded + key },
+                        dialogs = dialogs,
+                        onRestore = { StampDb.get(context).setDeleted(it.id, false) },
+                        onDeleteImport = { StampDb.get(context).deleteImported(entry.summary.date) },
+                    )
+                }
             }
         }
     }
     EventDialogsHost(dialogs)
+}
+
+@Composable
+private fun MonthHeader(month: YearMonth, days: List<DaySummary>, target: Int) {
+    val total = Summary.total(days, target)
+    AppCard(container = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.padding(top = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${total.days} Tage · Soll ${TimeFormat.hm(target.toLong())} h/Tag",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "${TimeFormat.hm(total.minutes)} h",
+                    style = MaterialTheme.typography.headlineSmall.merge(TabularNumbers),
+                )
+                Pill(
+                    "Saldo ${TimeFormat.signedHm(total.saldoMinutes)}",
+                    if (total.saldoMinutes >= 0) App.colors.good else App.colors.bad,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -119,64 +162,86 @@ private fun DayCard(
     onDeleteImport: () -> Unit,
 ) {
     val d = entry.summary
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.clickable(onClick = onToggle).padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
+    AppCard(onClick = onToggle, padding = 14.dp, modifier = Modifier.animateContentSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(52.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(TimeFormat.weekday(d.date), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${d.date.dayOfMonth}", style = MaterialTheme.typography.titleLarge)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    "${TimeFormat.weekday(d.date)} ${TimeFormat.shortDate(d.date)}",
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(0.25f),
+                    "${d.kommen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}  →  ${d.gehen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}",
+                    style = MaterialTheme.typography.bodyLarge.merge(TabularNumbers),
+                    fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    "${d.kommen?.let { TimeFormat.time(it.ts, zone) } ?: "–"} – ${d.gehen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}",
-                    modifier = Modifier.weight(0.35f),
-                )
-                Column(Modifier.weight(0.4f), horizontalAlignment = Alignment.End) {
-                    val duration = d.durationMinutes
-                    Text(duration?.let { "${TimeFormat.hm(it)} h" } ?: "unvollständig", fontWeight = FontWeight.SemiBold)
-                    d.saldoMinutes(target)?.let {
-                        Text(TimeFormat.signedHm(it), style = MaterialTheme.typography.bodySmall)
-                    }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    d.kommen?.let { Pill(sourceShort(it.source), sourceColor(it.source)) }
+                    if (d.gehen != null && d.gehen.source != d.kommen?.source) Pill(sourceShort(d.gehen.source), sourceColor(d.gehen.source))
+                    d.imported?.let { Pill(if (it.isAbsence) (it.note ?: "Import") else "Import", MaterialTheme.colorScheme.primary) }
                 }
             }
-            Text(
-                listOfNotNull(
-                    d.kommen?.let { "Kommen: ${it.source.label}" },
-                    d.gehen?.let { "Gehen: ${it.source.label}" },
-                    d.imported?.let { imp ->
-                        "Import: ${TimeFormat.hm(imp.minutes)} h" +
-                            (imp.note?.let { " ($it)" } ?: "") +
-                            (if (d.durationFromImport) " – gewertet" else "")
-                    },
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (expanded) {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                SmallLabel("Alle Quellen")
-                StampSource.entries.mapNotNull { src -> d.bySource[src]?.let { src to it } }.forEach { (src, t) ->
+            Column(horizontalAlignment = Alignment.End) {
+                val duration = d.durationMinutes
+                Text(
+                    duration?.let { "${TimeFormat.hm(it)} h" } ?: "offen",
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
+                    color = if (duration == null) App.colors.warn else MaterialTheme.colorScheme.onSurface,
+                )
+                d.saldoMinutes(target)?.let {
                     Text(
-                        "${src.label}: ${t.firstIn?.let { TimeFormat.time(it, zone) } ?: "–"} → " +
-                            "${t.lastOut?.let { TimeFormat.time(it, zone) } ?: if (t.open) "offen" else "–"}",
-                        style = MaterialTheme.typography.bodyMedium,
+                        TimeFormat.signedHm(it),
+                        style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
+                        color = if (it >= 0) App.colors.good else App.colors.bad,
                     )
                 }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                SmallLabel("Ereignisse")
-                entry.shownEvents.forEach { ev ->
-                    EventRow(
-                        event = ev,
-                        onEdit = { dialogs.editing = ev },
-                        onDelete = { dialogs.deleting = ev },
-                        onRestore = { onRestore(ev) },
+            }
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.rotate(rotation),
+            )
+        }
+        AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SmallLabel("Alle Quellen")
+                StampSource.entries.mapNotNull { src -> d.bySource[src]?.let { src to it } }.forEach { (src, t) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SourceBadge(src, 28.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${t.firstIn?.let { TimeFormat.time(it, zone) } ?: "–"} → " +
+                                (t.lastOut?.let { TimeFormat.time(it, zone) } ?: if (t.open) "offen" else "–"),
+                            style = MaterialTheme.typography.bodyMedium.merge(TabularNumbers),
+                        )
+                    }
+                }
+                d.imported?.let { imp ->
+                    InfoRow(
+                        "Import (Firma)" + (imp.note?.let { " · $it" } ?: ""),
+                        "${TimeFormat.hm(imp.minutes)} h" + if (d.durationFromImport) " · gewertet" else "",
                     )
+                }
+                if (entry.shownEvents.isNotEmpty()) {
+                    SmallLabel("Ereignisse")
+                    entry.shownEvents.forEach { ev ->
+                        EventRow(
+                            event = ev,
+                            onEdit = { dialogs.editing = ev },
+                            onDelete = { dialogs.deleting = ev },
+                            onRestore = { onRestore(ev) },
+                        )
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.IN }) { Text("+ Kommen") }
                     OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.OUT }) { Text("+ Gehen") }
                 }
                 if (d.imported != null) {
-                    TextButton(onClick = onDeleteImport) { Text("Importierten Eintrag dieses Tages entfernen") }
+                    TextButton(onClick = onDeleteImport) { Text("Import dieses Tages entfernen") }
                 }
             }
         }

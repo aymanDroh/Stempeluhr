@@ -8,6 +8,7 @@ import de.droh.stempeluhr.core.StudentRule
 import de.droh.stempeluhr.core.StampSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.YearMonth
 
 /** Einstellungen und der Zustand der automatischen Quellen (SharedPreferences). */
 class Settings private constructor(context: Context) {
@@ -103,6 +104,22 @@ class Settings private constructor(context: Context) {
     var reconcileToleranceMinutes: Int
         get() = prefs.getInt("reconcile_tolerance_min", 5)
         set(v) = edit { putInt("reconcile_tolerance_min", v) }
+
+    /** Bestätigte Abgleiche: Monat -> Fingerabdruck der Daten zum Zeitpunkt der Bestätigung. */
+    var confirmedReconciles: Map<YearMonth, String>
+        get() = prefs.getStringSet("confirmed_reconciles", emptySet()).orEmpty().mapNotNull { e ->
+            val parts = e.split('=', limit = 2)
+            if (parts.size == 2) runCatching { YearMonth.parse(parts[0]) to parts[1] }.getOrNull() else null
+        }.toMap()
+        set(v) = edit { putStringSet("confirmed_reconciles", v.map { (m, fp) -> "$m=$fp" }.toSet()) }
+
+    fun confirmReconcile(month: YearMonth, fingerprint: String) {
+        confirmedReconciles = confirmedReconciles + (month to fingerprint)
+    }
+
+    fun unconfirmReconcile(month: YearMonth) {
+        confirmedReconciles = confirmedReconciles - month
+    }
 
     // ---------- Werkstudent ----------
     var studentEnabled: Boolean

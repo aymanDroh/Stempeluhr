@@ -40,6 +40,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.rotate
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -108,6 +118,7 @@ fun SettingsScreen(
     onStartTagWrite: (StampEngine.Mode) -> Unit,
     onCancelTagWrite: () -> Unit,
     onImported: (YearMonth?) -> Unit,
+    onShowConfirmedReconciles: () -> Unit,
 ) {
     val context = LocalContext.current
     val (settings, settingsVersion) = rememberSettings()
@@ -117,15 +128,16 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        ScreenHeader("Optionen", "Erfassung, Import und Auswertung")
         SetupSection(resumeCount, settingsVersion)
+        ImportSection(settings, settingsVersion, onImported, onShowConfirmedReconciles)
+        StudentSection(settings, settingsVersion)
         WifiSection(settings, settingsVersion)
         GeoSection(settings, settingsVersion)
         NfcSection(settings, settingsVersion, tagWriteMode, onStartTagWrite, onCancelTagWrite)
         EvaluationSection(settings, settingsVersion)
-        StudentSection(settings, settingsVersion)
-        ImportSection(settings, settingsVersion, onImported)
         ExportSection(settings)
         Text(
             "Hinweis: Alle Daten liegen nur auf diesem Handy. Vor dem Deinstallieren oder Handywechsel " +
@@ -138,11 +150,30 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            content()
+private fun Section(title: String, expandedByDefault: Boolean = false, content: @Composable () -> Unit) {
+    var expanded by rememberSaveable(title) { mutableStateOf(expandedByDefault) }
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
+    AppCard(padding = 0.dp, modifier = Modifier.animateContentSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = if (expanded) "Zuklappen" else "Aufklappen",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.rotate(rotation),
+            )
+        }
+        AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+            Column(
+                Modifier.padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) { content() }
         }
     }
 }
@@ -187,7 +218,8 @@ private fun SetupSection(resumeCount: Int, settingsVersion: Long) {
         if (!ok) openAppSettings(context)
     }
 
-    Section("Einrichtung") {
+    val allOk = notifOk && fineOk && bgOk && batteryOk && locOk && (!hasNfc || nfcOk)
+    Section(if (allOk) "Einrichtung ✓" else "Einrichtung – bitte prüfen", expandedByDefault = !allOk) {
         Text(
             "Damit die Erfassung ohne Entsperren und ohne Zutun funktioniert, müssen alle Punkte einen Haken haben.",
             style = MaterialTheme.typography.bodySmall,
@@ -583,7 +615,12 @@ private fun StudentSection(settings: Settings, settingsVersion: Long) {
 private class ImportPreview(val fileName: String, val result: ImportResult, val replaced: Int, val existingRaw: Int)
 
 @Composable
-private fun ImportSection(settings: Settings, settingsVersion: Long, onImported: (YearMonth?) -> Unit) {
+private fun ImportSection(
+    settings: Settings,
+    settingsVersion: Long,
+    onImported: (YearMonth?) -> Unit,
+    onShowConfirmedReconciles: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val imported by rememberImportedDays()
@@ -666,6 +703,7 @@ private fun ImportSection(settings: Settings, settingsVersion: Long, onImported:
             }) { Text("OK") }
         }
         if (imported.isNotEmpty()) {
+            OutlinedButton(onClick = onShowConfirmedReconciles) { Text("Abgleiche ansehen (auch bestätigte)") }
             TextButton(onClick = { confirmDeleteAll = true }) { Text("Alle importierten Tage löschen") }
         }
     }

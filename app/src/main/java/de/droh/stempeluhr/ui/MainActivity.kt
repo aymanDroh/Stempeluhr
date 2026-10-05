@@ -1,13 +1,11 @@
 package de.droh.stempeluhr.ui
 
 import android.nfc.NfcAdapter
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -21,10 +19,16 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -32,7 +36,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import de.droh.stempeluhr.engine.Notifications
 import de.droh.stempeluhr.engine.StampEngine
 import de.droh.stempeluhr.nfc.NfcTags
@@ -53,7 +56,7 @@ class MainActivity : ComponentActivity() {
         Notifications.createChannels(this)
         setContent {
             StempelTheme {
-                App(
+                AppRoot(
                     resumeCount = resumeCount.intValue,
                     tagWriteMode = tagWriteMode.value,
                     onStartTagWrite = ::startTagWrite,
@@ -110,82 +113,102 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun StempelTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val context = LocalContext.current
-    val colors = when {
-        Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(context)
-        Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors, content = content)
-}
+private enum class Tab(val label: String) { HEUTE("Heute"), VERLAUF("Verlauf"), WOCHEN("Wochen"), ABGLEICH("Abgleich"), OPTIONEN("Optionen") }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun App(
+private fun AppRoot(
     resumeCount: Int,
     tagWriteMode: StampEngine.Mode?,
     onStartTagWrite: (StampEngine.Mode) -> Unit,
     onCancelTagWrite: () -> Unit,
 ) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableStateOf(Tab.HEUTE) }
     var reconcileMonth by rememberSaveable { mutableStateOf<String?>(null) }
+    var showConfirmed by rememberSaveable { mutableStateOf(false) }
+    val openMonths = rememberOpenReconcileMonths()
+    // Abgleich-Tab nur zeigen, solange es offene Monate gibt (oder er gerade geöffnet ist).
+    val showReconcileTab = openMonths.isNotEmpty() || tab == Tab.ABGLEICH
+    val tabs = Tab.entries.filter { it != Tab.ABGLEICH || showReconcileTab }
+
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                    label = { Text("Heute") },
-                )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text("Verlauf") },
-                )
-                NavigationBarItem(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
-                    icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
-                    label = { Text("Wochen") },
-                )
-                NavigationBarItem(
-                    selected = tab == 4,
-                    onClick = { tab = 4 },
-                    icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                    label = { Text("Abgleich") },
-                )
-                NavigationBarItem(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text("Optionen") },
-                )
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp) {
+                tabs.forEach { t ->
+                    NavigationBarItem(
+                        selected = tab == t,
+                        onClick = {
+                            if (t == Tab.ABGLEICH) showConfirmed = false
+                            tab = t
+                        },
+                        icon = {
+                            if (t == Tab.ABGLEICH && openMonths.isNotEmpty()) {
+                                BadgedBox(badge = { Badge { Text("${openMonths.size}") } }) { TabIcon(t) }
+                            } else {
+                                TabIcon(t)
+                            }
+                        },
+                        label = { Text(t.label, maxLines = 1) },
+                    )
+                }
             }
         },
     ) { padding ->
-        val modifier = Modifier.padding(padding)
-        when (tab) {
-            0 -> TodayScreen(modifier, resumeCount, onOpenSettings = { tab = 2 }, onOpenWeeks = { tab = 3 })
-            1 -> HistoryScreen(modifier)
-            3 -> WeeksScreen(modifier)
-            4 -> ReconcileScreen(
-                modifier,
-                month = reconcileMonth?.let { YearMonth.parse(it) },
-                onMonthChange = { reconcileMonth = it.toString() },
-                onImport = { tab = 2 },
-            )
-            else -> SettingsScreen(
-                modifier, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite,
-                onImported = { month ->
-                    if (month != null) reconcileMonth = month.toString()
-                    tab = 4
-                },
-            )
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val forward = targetState.ordinal > initialState.ordinal
+                (fadeIn(tween(250)) + slideInHorizontally(tween(300)) { w -> if (forward) w / 8 else -w / 8 }) togetherWith
+                    fadeOut(tween(150))
+            },
+            label = "tabs",
+            modifier = Modifier.padding(padding),
+        ) { current ->
+            val modifier = Modifier
+            when (current) {
+                Tab.HEUTE -> TodayScreen(
+                    modifier, resumeCount,
+                    onOpenSettings = { tab = Tab.OPTIONEN },
+                    onOpenWeeks = { tab = Tab.WOCHEN },
+                    onOpenReconcile = { tab = Tab.ABGLEICH },
+                )
+                Tab.VERLAUF -> HistoryScreen(modifier)
+                Tab.WOCHEN -> WeeksScreen(modifier)
+                Tab.ABGLEICH -> ReconcileScreen(
+                    modifier,
+                    month = reconcileMonth?.let { YearMonth.parse(it) },
+                    showConfirmed = showConfirmed,
+                    onShowConfirmedChange = { showConfirmed = it },
+                    onMonthChange = { reconcileMonth = it?.toString() },
+                    onImport = { tab = Tab.OPTIONEN },
+                    onDone = { tab = Tab.HEUTE },
+                )
+                Tab.OPTIONEN -> SettingsScreen(
+                    modifier, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite,
+                    onImported = { month ->
+                        reconcileMonth = month?.toString()
+                        showConfirmed = false
+                        tab = Tab.ABGLEICH
+                    },
+                    onShowConfirmedReconciles = {
+                        showConfirmed = true
+                        tab = Tab.ABGLEICH
+                    },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun TabIcon(t: Tab) {
+    val icon = when (t) {
+        Tab.HEUTE -> Icons.Filled.Home
+        Tab.VERLAUF -> Icons.AutoMirrored.Filled.List
+        Tab.WOCHEN -> Icons.Filled.DateRange
+        Tab.ABGLEICH -> Icons.Filled.CheckCircle
+        Tab.OPTIONEN -> Icons.Filled.Settings
+    }
+    Icon(icon, contentDescription = null)
 }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -111,31 +113,47 @@ fun EventRow(
     onDelete: () -> Unit,
     onRestore: () -> Unit,
 ) {
-    val color = if (event.type == StampType.IN) Color(0xFF2E7D32) else Color(0xFFC62828)
+    val color = if (event.type == StampType.IN) App.colors.good else App.colors.bad
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
-                text = "${TimeFormat.time(event.ts, zone)}  ${event.type.label}",
-                fontWeight = FontWeight.SemiBold,
-                color = if (event.deleted) MaterialTheme.colorScheme.outline else color,
-                textDecoration = if (event.deleted) TextDecoration.LineThrough else null,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = TimeFormat.time(event.ts, zone),
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
+                    color = if (event.deleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
+                    textDecoration = if (event.deleted) TextDecoration.LineThrough else null,
+                )
+                Spacer(Modifier.width(8.dp))
+                Pill(event.type.label, if (event.deleted) MaterialTheme.colorScheme.outline else color)
+                Spacer(Modifier.width(6.dp))
+                Pill(event.source.label, sourceColor(event.source))
+            }
             val details = buildList {
-                add(event.source.label)
                 if (event.edited) add("geändert, vorher ${TimeFormat.time(event.originalTs!!, zone)}")
                 if (event.deleted) add("gelöscht")
                 event.note?.takeIf { it.isNotBlank() }?.let { add(it) }
             }
-            Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            if (details.isNotEmpty()) {
+                Text(
+                    details.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
         if (event.deleted) {
             IconButton(onClick = onRestore) { Icon(Icons.Filled.Refresh, contentDescription = "Wiederherstellen") }
         } else {
-            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Bearbeiten") }
-            IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Löschen") }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Filled.Edit, contentDescription = "Bearbeiten", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = "Löschen", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -268,14 +286,14 @@ fun EventDialogsHost(state: EventDialogs) {
 
 @Composable
 fun SmallLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
 fun Bullet(ok: Boolean) {
     Text(
         if (ok) "✓" else "✗",
-        color = if (ok) Color(0xFF2E7D32) else Color(0xFFC62828),
+        color = if (ok) App.colors.good else App.colors.bad,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.size(20.dp),
     )
