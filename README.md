@@ -1,0 +1,76 @@
+# Stempeluhr
+
+Private Android-App (für das Samsung Galaxy S22), die die eigenen Arbeitszeiten **automatisch**
+mitschreibt, ohne Zugriff auf die Stechuhr der Firma zu haben. Die Daten liegen nur auf dem Handy
+und lassen sich als CSV für Excel exportieren.
+
+## Erfassungsarten
+
+| Quelle | Wie | Handy entsperren? | Genauigkeit |
+|---|---|---|---|
+| **WLAN** | Kommen = Verbindung mit dem Arbeits-WLAN, Gehen = getrennt | nein | gut (Betreten/Verlassen des Gebäudes) |
+| **Standort (Geofence)** | Kommen/Gehen beim Betreten/Verlassen eines Kreises um die Arbeit | nein | ca. 1–5 Minuten |
+| **NFC-Tag** | Aufkleber neben der Stechuhr, Handy dranhalten | **ja** (Android-Vorgabe) | sekundengenau |
+| **Manuell** | Buttons in der App, Kachel in den Schnelleinstellungen, Bearbeiten/Nachtragen | Kachel: nein | so genau wie man tippt |
+
+Alle Quellen werden parallel gespeichert. Für jeden Tag wird Kommen/Gehen nach einer einstellbaren
+Prioritätsliste gewertet (Standard: Manuell → NFC → WLAN → Standort). Alle anderen Zeiten bleiben sichtbar.
+
+Kurze WLAN- oder GPS-Aussetzer werden geglättet: Ein „weg“ zählt erst als Gehen, wenn die Quelle
+länger als die eingestellte Verzögerung (Standard 5 Minuten) weg bleibt. Das Gehen erhält dann den
+Zeitpunkt des ersten „weg“. Fehlt ein Gehen (z. B. weil das Handy aus war), wird **keine** Zeit
+erfunden, sondern die Lücke bleibt sichtbar und kann manuell nachgetragen werden.
+
+Korrekturen ändern die Zeit, die ursprüngliche Zeit bleibt gespeichert. Löschen markiert nur.
+Beides ist im Rohdaten-Export nachvollziehbar.
+
+## Installation
+
+1. **Einmalig: Signatur-Schlüssel als GitHub-Secrets hinterlegen**
+   (`Settings → Secrets and variables → Actions`): `STEMPELUHR_KEYSTORE_BASE64` und
+   `STEMPELUHR_KEYSTORE_PASSWORD`. Ohne festen Schlüssel lassen sich spätere Versionen nicht als
+   Update installieren, weil sich die Signatur ändern würde. Den Schlüssel **nie** ins Repo legen,
+   denn das Repo ist öffentlich.
+2. Nach jedem Push auf `main` baut GitHub Actions die APK und veröffentlicht sie unter
+   **Releases** (`Stempeluhr-<Nummer>.apk`).
+3. Die APK auf dem S22 im Browser herunterladen und öffnen. Dabei die Installation aus dieser
+   Quelle erlauben.
+
+## Einrichtung auf dem Handy
+
+In der App unter **Einstellungen → Einrichtung** müssen alle Punkte einen Haken haben:
+
+- Benachrichtigungen erlauben
+- Standort „genau“ erlauben und danach **„Immer erlauben“**. Das ist auch für WLAN nötig, weil
+  Android den WLAN-Namen sonst nicht herausgibt.
+- Standortdienst eingeschaltet lassen
+- Akku-Optimierung ausschalten. Zusätzlich bei Samsung: *Einstellungen → Akku →
+  Hintergrundnutzungslimits → Nie in Standby-Modus versetzte Apps* → Stempeluhr hinzufügen.
+
+Danach:
+
+- **WLAN:** Im Arbeits-WLAN auf „Aktuelles WLAN übernehmen“ tippen oder den Namen eintippen.
+- **Standort:** An der Arbeit auf „Aktuellen Standort übernehmen“ tippen. Radius 150 m ist ein
+  guter Startwert.
+- **NFC:** Einen NFC-Aufkleber (NTAG213/215) besorgen, auf „Umschalten“ tippen und den Aufkleber an
+  das Handy halten. Danach den Aufkleber neben die Stechuhr kleben, aber nur wenn das erlaubt ist.
+- **Kachel:** Schnelleinstellungen aufziehen → Stift/Bearbeiten → Kachel „Stempeln“ hinzufügen.
+- Optional: Seitentaste doppelt drücken → App öffnen (*Einstellungen → Erweiterte Funktionen →
+  Seitentaste*).
+
+Die dauerhafte Benachrichtigung „Stempeluhr läuft“ ist nötig, damit Android die WLAN-Erkennung
+nicht beendet. Sie kann in den App-Benachrichtigungen ausgeblendet werden (Kanal
+„Hintergrund-Erfassung“).
+
+## Technik
+
+- Kotlin, Jetpack Compose, minSdk 29, targetSdk 35
+- WLAN: `ConnectivityManager.NetworkCallback` in einem Foreground-Service (`specialUse`)
+- Standort: Google Play-Dienste Geofencing API
+- NFC: NDEF-Tag mit eigenem MIME-Typ `application/vnd.de.droh.stempeluhr`; Android startet die
+  App direkt beim Scannen
+- Daten: SQLite (`stempel.db`), Export als CSV (Semikolon, UTF-8 mit BOM)
+- Reine Logik (Auswertung, Glättung, CSV) in `app/src/main/java/de/droh/stempeluhr/core`, mit
+  Unit-Tests in `app/src/test`
+
+Lokal bauen (benötigt Android SDK): `./gradlew testDebugUnitTest assembleDebug`
