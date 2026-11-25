@@ -7,38 +7,48 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.Icon
-import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import de.droh.stempeluhr.R
 import de.droh.stempeluhr.core.DaySummary
 import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
@@ -46,76 +56,114 @@ import de.droh.stempeluhr.core.StampType
 import de.droh.stempeluhr.core.Summary
 import de.droh.stempeluhr.core.TimeFormat
 import de.droh.stempeluhr.data.StampDb
+import java.time.LocalDate
 import java.time.YearMonth
 
-private data class DayEntry(val summary: DaySummary, val shownEvents: List<StampEvent>)
+private data class DayEntry(val summary: DaySummary, val shownEvents: List<StampEvent>) {
+    /** Kommen ohne Gehen (und kein Import, der die Dauer liefert). */
+    val incomplete: Boolean get() = summary.kommen != null && summary.durationMinutes == null
+}
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(modifier: Modifier) {
     val context = LocalContext.current
     val events by rememberAllEvents()
     val imported by rememberImportedDays()
     val (settings, settingsVersion) = rememberSettings()
+    val messenger = LocalMessenger.current
     val priority = remember(settingsVersion) { settings.priority }
     val target = remember(settingsVersion) { settings.targetMinutes }
     val showDeleted = remember(settingsVersion) { settings.showDeleted }
     val options = remember(settingsVersion) { settings.evalOptions }
+    val today = Summary.localDate(rememberNow(), zone)
     val dialogs = remember { EventDialogs() }
-    var expanded by remember { mutableStateOf(setOf<String>()) }
+    var expanded by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var onlyOpen by rememberSaveable { mutableStateOf(false) }
 
-    val days = remember(events, imported, priority, showDeleted, options) {
+    val allDays = remember(events, imported, priority, showDeleted, options) {
         val byDate = events.groupBy { Summary.localDate(it.ts, zone) }
         val importByDate = imported.associateBy { it.date }
         (byDate.keys + importByDate.keys)
             .map { date ->
                 val list = byDate[date].orEmpty()
                 val summary = Summary.forDay(date, list, priority, importByDate[date], options)
-                DayEntry(summary, if (showDeleted) list.sortedBy { it.ts } else summary.events)
+                DayEntry(summary, if (showDeleted) list.sortedWith(compareBy({ it.ts }, { it.id })) else summary.events)
             }
             .filter { it.shownEvents.isNotEmpty() || it.summary.imported != null }
             .sortedByDescending { it.summary.date }
     }
+    // „Offen“ meint Tage, an denen ein Gehen fehlt – der heutige, noch laufende Tag gehört nicht dazu.
+    val openDays = remember(allDays, today) { allDays.filter { it.incomplete && it.summary.date != today } }
+    val days = if (onlyOpen) openDays else allDays
     val months = remember(days) { days.groupBy { YearMonth.from(it.summary.date) } }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { ScreenHeader("Verlauf", "${days.size} Tage") }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Gelöschte", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Switch(checked = showDeleted, onCheckedChange = { settings.showDeleted = it })
+            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScreenHeader("Verlauf", TimeFormat.plural(allDays.size, "Tag", "Tage") + " erfasst") {
+                    TonalButton("Nachtragen", icon = R.drawable.ic_add, compact = true, onClick = { dialogs.addingFor = today to StampType.IN })
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !onlyOpen, onClick = { onlyOpen = false }, label = { ChipLabel("Alle") })
+                    FilterChip(
+                        selected = onlyOpen,
+                        onClick = { onlyOpen = true },
+                        label = { ChipLabel("Gehen fehlt (${openDays.size})") },
+                    )
+                    FilterChip(
+                        selected = showDeleted,
+                        onClick = { settings.showDeleted = !showDeleted },
+                        label = { ChipLabel("Gelöschte") },
+                        leadingIcon = {
+                            AppIcon(if (showDeleted) R.drawable.ic_visibility else R.drawable.ic_visibility_off, size = 18.dp)
+                        },
+                    )
                 }
             }
         }
         if (days.isEmpty()) {
             item {
-                EmptyState(
-                    "Noch keine Einträge",
-                    "Sobald etwas erfasst oder importiert ist, erscheint es hier – nach Monaten sortiert.",
-                )
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    if (onlyOpen) {
+                        EmptyState(R.drawable.ic_task, "Nichts offen", "An keinem Tag fehlt ein Gehen.")
+                    } else {
+                        EmptyState(
+                            R.drawable.ic_history,
+                            "Noch keine Einträge",
+                            "Sobald etwas erfasst oder importiert ist, erscheint es hier – nach Monaten sortiert.",
+                        )
+                    }
+                }
             }
         }
-        var index = 0
         months.forEach { (month, monthDays) ->
-            val i = index++
-            item(key = "m$month") {
-                Appear(i) { MonthHeader(month, monthDays.map { it.summary }, target) }
+            stickyHeader(key = "m$month") {
+                MonthHeader(month, monthDays.map { it.summary }, target)
             }
             items(monthDays, key = { it.summary.date.toString() }) { entry ->
                 val key = entry.summary.date.toString()
-                Box(Modifier.animateItem()) {
+                Box(Modifier.animateItem().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     DayCard(
                         entry = entry,
                         target = target,
+                        isToday = entry.summary.date == today,
                         expanded = key in expanded,
                         onToggle = { expanded = if (key in expanded) expanded - key else expanded + key },
                         dialogs = dialogs,
                         onRestore = { StampDb.get(context).setDeleted(it.id, false) },
-                        onDeleteImport = { StampDb.get(context).deleteImported(entry.summary.date) },
+                        onDeleteImport = {
+                            val removed = entry.summary.imported
+                            StampDb.get(context).deleteImported(entry.summary.date)
+                            if (removed != null) {
+                                messenger.show("Import vom ${TimeFormat.date(removed.date)} entfernt", "Rückgängig") {
+                                    StampDb.get(context).upsertImported(listOf(removed), null)
+                                }
+                            }
+                        },
                     )
                 }
             }
@@ -124,37 +172,42 @@ fun HistoryScreen(modifier: Modifier) {
     EventDialogsHost(dialogs)
 }
 
+/** Monatszeile, die beim Scrollen oben stehen bleibt. */
 @Composable
 private fun MonthHeader(month: YearMonth, days: List<DaySummary>, target: Int) {
     val total = Summary.total(days, target)
-    AppCard(container = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.padding(top = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "${total.days} Tage · Soll ${TimeFormat.hm(target.toLong())} h/Tag",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    "${TimeFormat.hm(total.minutes)} h",
-                    style = MaterialTheme.typography.headlineSmall.merge(TabularNumbers),
-                )
-                Pill(
-                    "Saldo ${TimeFormat.signedHm(total.saldoMinutes)}",
-                    if (total.saldoMinutes >= 0) App.colors.good else App.colors.bad,
-                )
-            }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleLarge)
+            Text(
+                "${TimeFormat.plural(total.days, "Tag", "Tage")} · Soll ${TimeFormat.hm(target.toLong())} h/Tag",
+                style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("${TimeFormat.hm(total.minutes)} h", style = MaterialTheme.typography.titleLarge.merge(TabularNumbers))
+            Text(
+                "Saldo ${TimeFormat.signedHm(total.saldoMinutes)}",
+                style = MaterialTheme.typography.labelMedium.merge(TabularNumbers),
+                color = if (total.saldoMinutes >= 0) App.colors.good else App.colors.bad,
+            )
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DayCard(
     entry: DayEntry,
     target: Int,
+    isToday: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
     dialogs: EventDialogs,
@@ -163,60 +216,88 @@ private fun DayCard(
 ) {
     val d = entry.summary
     val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
-    AppCard(onClick = onToggle, padding = 14.dp, modifier = Modifier.animateContentSize()) {
+    val running = isToday && entry.incomplete
+    AppCard(
+        onClick = onToggle,
+        onClickLabel = if (expanded) "Zuklappen" else "Aufklappen",
+        padding = 12.dp,
+        spacing = 0.dp,
+        modifier = Modifier.animateContentSize().semantics { stateDescription = if (expanded) "aufgeklappt" else "zugeklappt" },
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(52.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(TimeFormat.weekday(d.date), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("${d.date.dayOfMonth}", style = MaterialTheme.typography.titleLarge)
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+            DateBlock(d.date, highlight = isToday)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
-                    "${d.kommen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}  →  ${d.gehen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}",
-                    style = MaterialTheme.typography.bodyLarge.merge(TabularNumbers),
-                    fontWeight = FontWeight.SemiBold,
+                    if (d.kommen == null && d.gehen == null) {
+                        d.imported?.note?.takeIf { d.imported!!.isAbsence } ?: "Nur Import"
+                    } else {
+                        "${d.kommen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}  →  ${d.gehen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}"
+                    },
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    d.kommen?.let { Pill(sourceShort(it.source), sourceColor(it.source)) }
-                    if (d.gehen != null && d.gehen.source != d.kommen?.source) Pill(sourceShort(d.gehen.source), sourceColor(d.gehen.source))
-                    d.imported?.let { Pill(if (it.isAbsence) (it.note ?: "Import") else "Import", MaterialTheme.colorScheme.primary) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    d.kommen?.let { SourcePill(it.source) }
+                    if (d.gehen != null && d.gehen.source != d.kommen?.source) SourcePill(d.gehen.source)
+                    d.imported?.let {
+                        Pill(if (it.isAbsence) (it.note ?: "Import") else "Import", MaterialTheme.colorScheme.primary, icon = R.drawable.ic_import)
+                    }
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 val duration = d.durationMinutes
-                Text(
-                    duration?.let { "${TimeFormat.hm(it)} h" } ?: "offen",
-                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
-                    color = if (duration == null) App.colors.warn else MaterialTheme.colorScheme.onSurface,
-                )
+                when {
+                    duration != null -> Text("${TimeFormat.hm(duration)} h", style = MaterialTheme.typography.titleMedium.merge(TabularNumbers))
+                    running -> Pill("läuft", App.colors.good)
+                    else -> Pill("Gehen fehlt", App.colors.warn)
+                }
                 d.saldoMinutes(target)?.let {
                     Text(
                         TimeFormat.signedHm(it),
-                        style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
+                        style = MaterialTheme.typography.labelMedium.merge(TabularNumbers),
                         color = if (it >= 0) App.colors.good else App.colors.bad,
                     )
                 }
             }
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.rotate(rotation),
+            AppIcon(
+                R.drawable.ic_expand,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp).rotate(rotation),
+                size = 22.dp,
             )
         }
         AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                SmallLabel("Alle Quellen")
-                StampSource.entries.mapNotNull { src -> d.bySource[src]?.let { src to it } }.forEach { (src, t) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SourceBadge(src, 28.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "${t.firstIn?.let { TimeFormat.time(it, zone) } ?: "–"} → " +
-                                (t.lastOut?.let { TimeFormat.time(it, zone) } ?: if (t.open) "offen" else "–"),
-                            style = MaterialTheme.typography.bodyMedium.merge(TabularNumbers),
-                        )
+            Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                val sources = StampSource.entries.mapNotNull { src -> d.bySource[src]?.let { src to it } }
+                if (sources.isNotEmpty()) {
+                    Caption("Zeiten je Quelle")
+                    sources.forEach { (src, t) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(100.dp)) { SourcePill(src) }
+                            Text(
+                                "${t.firstIn?.let { TimeFormat.time(it, zone) } ?: "–"}  →  " +
+                                    (t.lastOut?.let { TimeFormat.time(it, zone) } ?: if (t.open) "offen" else "–"),
+                                style = MaterialTheme.typography.bodyMedium.merge(TabularNumbers),
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f),
+                            )
+                            // Welche Zeit dieser Quelle in die Tageswertung eingeht.
+                            val counts = when {
+                                d.kommen?.source == src && d.gehen?.source == src -> "zählt"
+                                d.kommen?.source == src -> "Kommen zählt"
+                                d.gehen?.source == src -> "Gehen zählt"
+                                else -> null
+                            }
+                            if (counts != null) {
+                                AppIcon(R.drawable.ic_check, tint = App.colors.good, size = 16.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Text(counts, style = MaterialTheme.typography.labelSmall, color = App.colors.good, maxLines = 1)
+                            }
+                        }
                     }
                 }
                 d.imported?.let { imp ->
@@ -226,24 +307,48 @@ private fun DayCard(
                     )
                 }
                 if (entry.shownEvents.isNotEmpty()) {
-                    SmallLabel("Ereignisse")
-                    entry.shownEvents.forEach { ev ->
-                        EventRow(
-                            event = ev,
-                            onEdit = { dialogs.editing = ev },
-                            onDelete = { dialogs.deleting = ev },
-                            onRestore = { onRestore(ev) },
-                        )
+                    Caption("Einträge – zum Bearbeiten antippen", Modifier.padding(top = 4.dp))
+                    Column {
+                        entry.shownEvents.forEach { ev ->
+                            EventRow(event = ev, onEdit = { dialogs.editing = ev }, onRestore = { onRestore(ev) })
+                        }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.IN }) { Text("+ Kommen") }
-                    OutlinedButton(onClick = { dialogs.addingFor = d.date to StampType.OUT }) { Text("+ Gehen") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 2.dp)) {
+                    TonalButton("Kommen", icon = R.drawable.ic_add, onClick = { dialogs.addingFor = d.date to StampType.IN }, modifier = Modifier.weight(1f))
+                    TonalButton("Gehen", icon = R.drawable.ic_add, onClick = { dialogs.addingFor = d.date to StampType.OUT }, modifier = Modifier.weight(1f))
                 }
                 if (d.imported != null) {
-                    TextButton(onClick = onDeleteImport) { Text("Import dieses Tages entfernen") }
+                    TextButton(onClick = onDeleteImport) {
+                        AppIcon(R.drawable.ic_delete, size = 18.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import dieses Tages entfernen")
+                    }
                 }
             }
         }
+    }
+}
+
+/** Wochentag und Tag des Monats als kleiner Block. */
+@Composable
+fun DateBlock(date: LocalDate, highlight: Boolean = false) {
+    val container = if (highlight) MaterialTheme.colorScheme.primaryContainer else App.colors.inset
+    val content = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier
+            .size(width = 46.dp, height = 52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(container)
+            .semantics(mergeDescendants = true) { contentDescription = "${TimeFormat.weekdayLong(date)}, ${TimeFormat.date(date)}" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            TimeFormat.weekday(date),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (highlight) content else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("${date.dayOfMonth}", style = MaterialTheme.typography.titleLarge.merge(TabularNumbers), color = content)
     }
 }

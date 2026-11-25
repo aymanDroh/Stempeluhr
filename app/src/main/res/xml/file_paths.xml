@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nur dieser Cache-Ordner darf über "Teilen" an andere Apps gegeben werden (Sicherung, CSV-Export). -->
+<paths>
+    <cache-path name="sicherung" path="sicherung/" />
+</paths>

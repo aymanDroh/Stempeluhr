@@ -1,42 +1,31 @@
 package de.droh.stempeluhr.ui
 
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,17 +36,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import de.droh.stempeluhr.R
 import de.droh.stempeluhr.core.DayComparison
+import de.droh.stempeluhr.core.DaySummary
 import de.droh.stempeluhr.core.MatchStatus
 import de.droh.stempeluhr.core.Reconcile
 import de.droh.stempeluhr.core.Summary
 import de.droh.stempeluhr.core.TimeFormat
 import java.time.YearMonth
+import kotlin.math.abs
 
 @Composable
 private fun statusColor(s: MatchStatus): Color = when (s) {
@@ -67,9 +57,16 @@ private fun statusColor(s: MatchStatus): Color = when (s) {
     MatchStatus.ONLY_IMPORT, MatchStatus.OWN_INCOMPLETE -> App.colors.warn
 }
 
+private fun statusIcon(s: MatchStatus): Int = when (s) {
+    MatchStatus.OK -> R.drawable.ic_check_circle
+    MatchStatus.ABSENCE -> R.drawable.ic_event_busy
+    MatchStatus.DIFF, MatchStatus.ONLY_OWN -> R.drawable.ic_error
+    MatchStatus.ONLY_IMPORT, MatchStatus.OWN_INCOMPLETE -> R.drawable.ic_warning
+}
+
 /** Alle Tage (eigene Erfassung + Import) – für Abgleich und Badge. */
 @Composable
-private fun rememberAllDaySummaries(): Pair<List<de.droh.stempeluhr.core.DaySummary>, Long> {
+private fun rememberAllDaySummaries(): Pair<List<DaySummary>, Long> {
     val events by rememberAllEvents()
     val imported by rememberImportedDays()
     val (settings, settingsVersion) = rememberSettings()
@@ -90,7 +87,7 @@ fun rememberOpenReconcileMonths(): List<YearMonth> {
 }
 
 /** Abgleich der Firmendaten (Import) mit der eigenen Erfassung. Bestätigte Monate verschwinden. */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReconcileScreen(
     modifier: Modifier,
@@ -102,6 +99,7 @@ fun ReconcileScreen(
     onDone: () -> Unit,
 ) {
     val context = LocalContext.current
+    val messenger = LocalMessenger.current
     val (days, settingsVersion) = rememberAllDaySummaries()
     val settings = rememberSettings().first
     val openMonths = rememberOpenReconcileMonths()
@@ -120,30 +118,32 @@ fun ReconcileScreen(
                 context.contentResolver.openOutputStream(uri)?.use {
                     it.write(Reconcile.csv(comparison, zone).toByteArray(Charsets.UTF_8))
                 }
-                Toast.makeText(context, "Abgleich gespeichert.", Toast.LENGTH_SHORT).show()
+                messenger.show("Abgleich gespeichert")
             } catch (e: Exception) {
-                Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
+                messenger.show("Export fehlgeschlagen: ${e.message}", long = true)
             }
         }
     }
 
     if (selected == null || comparison == null) {
-        Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            ScreenHeader("Abgleich")
+        Column(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenHeader("Abgleich", "Stundenzettel der Firma gegen eigene Erfassung")
             Appear {
                 if (allMonths.isEmpty()) {
                     EmptyState(
+                        R.drawable.ic_reconcile,
                         "Noch nichts abzugleichen",
                         "Importiere den Stundenzettel (PDF) eines Monats – er wird dann Tag für Tag mit deiner eigenen Erfassung verglichen.",
-                    ) { Button(onClick = onImport) { Text("Zum Import") } }
+                    ) { PrimaryButton("Stundenzettel importieren", icon = R.drawable.ic_upload, onClick = onImport) }
                 } else {
                     EmptyState(
+                        R.drawable.ic_task,
                         "Alles abgeglichen",
                         "Alle importierten Monate sind bestätigt. Beim nächsten Import erscheint der Abgleich wieder.",
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { onShowConfirmedChange(true) }) { Text("Bestätigte ansehen") }
-                            Button(onClick = onDone) { Text("Fertig") }
+                            QuietButton("Bestätigte ansehen", onClick = { onShowConfirmedChange(true) })
+                            PrimaryButton("Fertig", onClick = onDone)
                         }
                     }
                 }
@@ -159,13 +159,17 @@ fun ReconcileScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             ScreenHeader(
                 "Abgleich",
-                if (showConfirmed) "Alle importierten Monate" else "${openMonths.size} offene(r) Monat(e) zu prüfen",
+                if (showConfirmed) {
+                    "Alle importierten Monate"
+                } else {
+                    "${TimeFormat.plural(openMonths.size, "offener Monat", "offene Monate")} zu prüfen"
+                },
             )
         }
         item {
@@ -174,7 +178,7 @@ fun ReconcileScreen(
                     FilterChip(
                         selected = m == selected,
                         onClick = { onMonthChange(m) },
-                        label = { Text(TimeFormat.month(m.atDay(1))) },
+                        label = { ChipLabel(TimeFormat.month(m.atDay(1))) },
                     )
                 }
             }
@@ -188,13 +192,16 @@ fun ReconcileScreen(
             ) { c ->
                 val problems = c.problems
                 val diff = c.ownTotal - c.importTotal
-                AppCard(container = if (problems > 0) App.colors.badContainer else App.colors.goodContainer) {
+                val tone = if (problems > 0) App.colors.bad else App.colors.good
+                AppCard(spacing = 12.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconBubble(if (problems > 0) R.drawable.ic_error_fill else R.drawable.ic_check_circle_fill, tone, size = 44.dp)
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (problems == 0) "Alles stimmt" else "$problems Auffälligkeit${if (problems == 1) "" else "en"}",
+                                if (problems == 0) "Alles stimmt" else TimeFormat.plural(problems, "Auffälligkeit", "Auffälligkeiten"),
                                 style = MaterialTheme.typography.headlineSmall,
-                                color = if (problems > 0) App.colors.bad else App.colors.good,
+                                color = tone,
                             )
                             Text(
                                 TimeFormat.month(c.month.atDay(1)),
@@ -202,37 +209,46 @@ fun ReconcileScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (isConfirmed) Pill("bestätigt", App.colors.good)
+                        if (isConfirmed) Pill("bestätigt", App.colors.good, icon = R.drawable.ic_check)
                     }
                     CompareBars(c.importTotal, c.ownTotal)
                     InfoRow(
                         "Differenz eigene − Firma",
                         "${TimeFormat.signedHm(diff)} h",
-                        valueColor = if (kotlin.math.abs(diff) > c.toleranceMinutes) App.colors.bad else MaterialTheme.colorScheme.onSurface,
+                        valueColor = if (problems > 0 && abs(diff) > c.toleranceMinutes) App.colors.bad else MaterialTheme.colorScheme.onSurface,
                         bold = true,
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         MatchStatus.entries.forEach { s ->
-                            Pill("${s.label}: ${c.countByStatus[s] ?: 0}", statusColor(s))
+                            val count = c.countByStatus[s] ?: 0
+                            // Kategorien ohne Treffer bleiben sichtbar, treten aber zurück.
+                            Pill(
+                                "${s.label}: $count",
+                                if (count > 0) statusColor(s) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                container = if (count > 0) statusColor(s).copy(alpha = 0.12f) else App.colors.inset,
+                            )
                         }
                     }
-                    Text(
-                        "Toleranz ±${c.toleranceMinutes} min. Die Firmendaten enthalten nur die Dauer je Tag, keine Uhrzeiten.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Hint("Toleranz ±${c.toleranceMinutes} min. Die Firmendaten enthalten nur die Dauer je Tag, keine Uhrzeiten.")
                 }
             }
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !onlyProblems, onClick = { onlyProblems = false }, label = { Text("Alle Tage (${comparison.days.size})") })
-                FilterChip(selected = onlyProblems, onClick = { onlyProblems = true }, label = { Text("Nur Auffälligkeiten (${comparison.problems})") })
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !onlyProblems, onClick = { onlyProblems = false }, label = { ChipLabel("Alle Tage (${comparison.days.size})") })
+                FilterChip(selected = onlyProblems, onClick = { onlyProblems = true }, label = { ChipLabel("Auffällige (${comparison.problems})") })
             }
         }
         if (shown.isEmpty()) {
-            item { Text("Keine Tage in dieser Auswahl.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item {
+                Text(
+                    "Keine Tage in dieser Auswahl.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
         }
         items(shown, key = { "${selected}_${it.date}" }) { d ->
             Box(Modifier.animateItem()) { ComparisonRow(d) }
@@ -241,34 +257,40 @@ fun ReconcileScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                 if (!isConfirmed) {
-                    Button(
+                    PrimaryButton(
+                        "Geprüft – Abgleich bestätigen",
+                        icon = R.drawable.ic_check,
+                        container = App.colors.good,
+                        content = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             settings.confirmReconcile(selected, fingerprint)
                             val next = openMonths.firstOrNull { it != selected }
                             onMonthChange(next)
-                            Toast.makeText(context, "${TimeFormat.month(selected.atDay(1))} bestätigt.", Toast.LENGTH_SHORT).show()
+                            messenger.show("${TimeFormat.month(selected.atDay(1))} bestätigt", "Rückgängig") {
+                                settings.unconfirmReconcile(selected)
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = App.colors.good, contentColor = Color.White),
-                    ) {
-                        Icon(Icons.Filled.Check, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Geprüft – Abgleich bestätigen", fontWeight = FontWeight.Bold)
-                    }
+                    )
                     if (!showConfirmed && openMonths.size > 1) {
                         TextButton(onClick = { confirmAll = true }, modifier = Modifier.fillMaxWidth()) {
                             Text("Alle ${openMonths.size} offenen Monate bestätigen")
                         }
                     }
                 } else {
-                    TextButton(onClick = { settings.unconfirmReconcile(selected) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Bestätigung aufheben (wieder als offen anzeigen)")
-                    }
+                    QuietButton(
+                        "Bestätigung aufheben",
+                        icon = R.drawable.ic_undo,
+                        onClick = { settings.unconfirmReconcile(selected) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-                OutlinedButton(
+                QuietButton(
+                    "Abgleich als CSV exportieren",
+                    icon = R.drawable.ic_download,
                     onClick = { exportLauncher.launch("Stempeluhr-Abgleich-$selected.csv") },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Abgleich als CSV exportieren") }
+                )
                 if (showConfirmed) {
                     TextButton(onClick = { onShowConfirmedChange(false) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Nur offene Monate anzeigen")
@@ -310,6 +332,7 @@ private fun CompareBars(importTotal: Long, ownTotal: Long) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         InfoRow("Firma (Stundenzettel)", "${TimeFormat.hm(importTotal)} h")
         ProgressBar(importTotal / max, MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.padding(top = 2.dp))
         InfoRow("Eigene Erfassung", "${TimeFormat.hm(ownTotal)} h")
         ProgressBar(ownTotal / max, App.colors.good)
     }
@@ -318,61 +341,51 @@ private fun CompareBars(importTotal: Long, ownTotal: Long) {
 @Composable
 private fun ComparisonRow(d: DayComparison) {
     val color = statusColor(d.status)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .animateContentSize(),
-    ) {
-        Box(Modifier.width(6.dp).fillMaxHeight().background(color))
-        Column(Modifier.padding(14.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    AppCard(padding = 12.dp, spacing = 8.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DateBlock(d.date)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Caption("Firma")
                 Text(
-                    "${TimeFormat.weekday(d.date)} ${TimeFormat.shortDate(d.date)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Pill(d.status.label, color)
-            }
-            Row {
-                Column(Modifier.weight(1f)) {
-                    Text("Firma", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        (d.importMinutes?.let { "${TimeFormat.hm(it)} h" } ?: "–") + (d.importNote?.let { " · $it" } ?: ""),
-                        style = MaterialTheme.typography.bodyLarge.merge(TabularNumbers),
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Eigene", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        d.ownMinutes?.let { "${TimeFormat.hm(it)} h" } ?: "–",
-                        style = MaterialTheme.typography.bodyLarge.merge(TabularNumbers),
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                d.diffMinutes?.takeIf { it != 0L }?.let {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("Diff.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            TimeFormat.signedHm(it),
-                            style = MaterialTheme.typography.bodyLarge.merge(TabularNumbers),
-                            fontWeight = FontWeight.Bold,
-                            color = if (d.status == MatchStatus.DIFF) App.colors.bad else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
-            }
-            if (d.kommen != null || d.gehen != null) {
-                Text(
-                    "Kommen ${d.kommen?.let { "${TimeFormat.time(it.ts, zone)} (${it.source.label})" } ?: "–"}  ·  " +
-                        "Gehen ${d.gehen?.let { "${TimeFormat.time(it.ts, zone)} (${it.source.label})" } ?: "–"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    d.importMinutes?.let { "${TimeFormat.hm(it)} h" } ?: "–",
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
                 )
             }
+            Column(Modifier.weight(1f)) {
+                Caption("Eigene")
+                Text(
+                    d.ownMinutes?.let { "${TimeFormat.hm(it)} h" } ?: "–",
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
+                )
+            }
+            Column(Modifier.weight(0.9f), horizontalAlignment = Alignment.End) {
+                Caption("Differenz")
+                Text(
+                    d.diffMinutes?.let { TimeFormat.signedHm(it) } ?: "–",
+                    style = MaterialTheme.typography.titleMedium.merge(TabularNumbers),
+                    color = if (d.status == MatchStatus.DIFF) App.colors.bad else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Pill(d.status.label, color, icon = statusIcon(d.status))
+            Spacer(Modifier.width(8.dp))
+            val detail = buildList {
+                d.importNote?.let { add(it) }
+                if (d.kommen != null || d.gehen != null) {
+                    add(
+                        "${d.kommen?.let { TimeFormat.time(it.ts, zone) } ?: "–"} → ${d.gehen?.let { TimeFormat.time(it.ts, zone) } ?: "–"}" +
+                            (d.kommen ?: d.gehen)?.let { " (${sourceName(it.source)})" }.orEmpty(),
+                    )
+                }
+            }.joinToString(" · ")
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }

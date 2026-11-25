@@ -6,6 +6,7 @@ import android.os.Looper
 import de.droh.stempeluhr.core.AutoLogic
 import de.droh.stempeluhr.core.AutoResult
 import de.droh.stempeluhr.core.PreciseLogic
+import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.StampType
 import de.droh.stempeluhr.core.TimeFormat
@@ -97,13 +98,21 @@ object StampEngine {
      * Speichert ein NFC- oder manuelles Ereignis.
      * @return die gespeicherte Art oder null, wenn es als Doppel-Lesung ignoriert wurde.
      */
-    @Synchronized
     fun precise(
         context: Context,
         source: StampSource,
         mode: Mode,
         ts: Long = System.currentTimeMillis(),
-    ): StampType? {
+    ): StampType? = preciseEvent(context, source, mode, ts)?.type
+
+    /** Wie [precise], liefert aber das gespeicherte Ereignis – z. B. damit die Oberfläche „Rückgängig“ anbieten kann. */
+    @Synchronized
+    fun preciseEvent(
+        context: Context,
+        source: StampSource,
+        mode: Mode,
+        ts: Long = System.currentTimeMillis(),
+    ): StampEvent? {
         val db = StampDb.get(context)
         if (source == StampSource.NFC) {
             val last = db.lastOf(StampSource.NFC)
@@ -114,9 +123,9 @@ object StampEngine {
             Mode.OUT -> StampType.OUT
             Mode.TOGGLE -> PreciseLogic.nextToggleType(todayEvents(context))
         }
-        db.insert(ts, type, source)
+        val id = db.insert(ts, type, source)
         notifyStamp(context, type, source, ts)
-        return type
+        return db.get(id) ?: StampEvent(id, ts, type, source, null, ts, null, false)
     }
 
     fun nextToggleType(context: Context): StampType = PreciseLogic.nextToggleType(todayEvents(context))

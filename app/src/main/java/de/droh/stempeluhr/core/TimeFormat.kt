@@ -14,6 +14,7 @@ object TimeFormat {
     private val shortDateFmt = DateTimeFormatter.ofPattern("dd.MM.")
 
     private val weekdays = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+    private val weekdaysLong = listOf("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
     private val months = listOf(
         "Januar", "Februar", "März", "April", "Mai", "Juni",
         "Juli", "August", "September", "Oktober", "November", "Dezember",
@@ -25,7 +26,17 @@ object TimeFormat {
     fun date(d: LocalDate): String = dateFmt.format(d)
     fun shortDate(d: LocalDate): String = shortDateFmt.format(d)
     fun weekday(d: LocalDate): String = weekdays[d.dayOfWeek.value - 1]
+    fun weekdayLong(d: LocalDate): String = weekdaysLong[d.dayOfWeek.value - 1]
     fun month(d: LocalDate): String = "${months[d.monthValue - 1]} ${d.year}"
+
+    /** Z. B. "Nov" (für Achsenbeschriftungen). */
+    fun monthShort(d: LocalDate): String = months[d.monthValue - 1].take(3)
+
+    /** Z. B. "25. November". */
+    fun dayMonth(d: LocalDate): String = "${d.dayOfMonth}. ${months[d.monthValue - 1]}"
+
+    /** Anzahl mit passendem Wort: plural(1, "Monat", "Monate") -> "1 Monat". */
+    fun plural(n: Int, one: String, many: String): String = "$n ${if (n == 1) one else many}"
 
     /** Minuten als h:mm, z. B. 524 -> "8:44". */
     fun hm(minutes: Long): String {

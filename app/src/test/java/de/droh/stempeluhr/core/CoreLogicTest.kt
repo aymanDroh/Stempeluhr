@@ -177,6 +177,12 @@ class CoreLogicTest {
         assertEquals("8,73", TimeFormat.decimalHours(524))
         assertEquals("Mo", TimeFormat.weekday(LocalDate.of(2026, 10, 5)))
         assertEquals("Oktober 2026", TimeFormat.month(LocalDate.of(2026, 10, 5)))
+        assertEquals("Montag", TimeFormat.weekdayLong(LocalDate.of(2026, 10, 5)))
+        assertEquals("5. Oktober", TimeFormat.dayMonth(LocalDate.of(2026, 10, 5)))
+        assertEquals("Okt", TimeFormat.monthShort(LocalDate.of(2026, 10, 5)))
+        assertEquals("Mär", TimeFormat.monthShort(LocalDate.of(2026, 3, 1)))
+        assertEquals("1 Monat", TimeFormat.plural(1, "Monat", "Monate"))
+        assertEquals("0 Monate", TimeFormat.plural(0, "Monat", "Monate"))
     }
 
     @Test
