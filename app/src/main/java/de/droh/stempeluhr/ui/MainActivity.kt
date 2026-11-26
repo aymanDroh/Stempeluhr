@@ -1,11 +1,7 @@
 package de.droh.stempeluhr.ui
 
-import android.content.Intent
 import android.graphics.Color as AndroidColor
-import android.net.Uri
-import android.nfc.NfcAdapter
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -51,13 +47,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.IntentCompat
 import de.droh.stempeluhr.R
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.TimeFormat
 import de.droh.stempeluhr.engine.Notifications
 import de.droh.stempeluhr.engine.StampEngine
-import de.droh.stempeluhr.nfc.NfcTags
 import de.droh.stempeluhr.service.MonitorService
 import java.time.YearMonth
 
@@ -66,18 +60,10 @@ class MainActivity : ComponentActivity() {
     /** Zählt bei jedem onResume hoch, damit Berechtigungs-Status neu geprüft werden. */
     private val resumeCount = mutableIntStateOf(0)
 
-    /** Gesetzt, solange auf einen NFC-Tag zum Beschreiben gewartet wird. */
-    private val tagWriteMode = mutableStateOf<StampEngine.Mode?>(null)
-
-    /** Datei, die über „Öffnen mit“ oder „Teilen“ an die App gegeben wurde (Sicherung vom alten Handy). */
-    private val incomingFile = mutableStateOf<Uri?>(null)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Notifications.createChannels(this)
-        // Nur beim ersten Start auswerten – nach einer Drehung ist die Datei schon in Arbeit.
-        if (savedInstanceState == null) handleIncoming(intent)
         setContent {
             val (settings, _) = rememberSettings()
             val dark = isAppDark(settings.themeMode)
@@ -92,31 +78,9 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
             StempelTheme(dark) {
-                AppRoot(
-                    resumeCount = resumeCount.intValue,
-                    tagWriteMode = tagWriteMode.value,
-                    onStartTagWrite = ::startTagWrite,
-                    onCancelTagWrite = ::cancelTagWrite,
-                    incomingFile = incomingFile.value,
-                    onIncomingHandled = { incomingFile.value = null },
-                )
+                AppRoot(resumeCount = resumeCount.intValue)
             }
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleIncoming(intent)
-    }
-
-    private fun handleIncoming(intent: Intent?) {
-        val uri = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-            else -> null
-        }
-        if (uri != null) incomingFile.value = uri
     }
 
     override fun onResume() {
@@ -124,46 +88,6 @@ class MainActivity : ComponentActivity() {
         StampEngine.tick(this)
         MonitorService.start(this)
         resumeCount.intValue++
-        if (tagWriteMode.value != null) enableReader()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
-    }
-
-    private fun startTagWrite(mode: StampEngine.Mode) {
-        val adapter = NfcAdapter.getDefaultAdapter(this)
-        if (adapter == null || !adapter.isEnabled) {
-            Toast.makeText(this, "NFC ist nicht verfügbar oder ausgeschaltet.", Toast.LENGTH_LONG).show()
-            return
-        }
-        tagWriteMode.value = mode
-        enableReader()
-    }
-
-    private fun cancelTagWrite() {
-        tagWriteMode.value = null
-        NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
-    }
-
-    private fun enableReader() {
-        val adapter = NfcAdapter.getDefaultAdapter(this) ?: return
-        val flags = NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
-            NfcAdapter.FLAG_READER_NFC_F or NfcAdapter.FLAG_READER_NFC_V
-        adapter.enableReaderMode(this, { tag ->
-            val mode = tagWriteMode.value ?: return@enableReaderMode
-            val error = NfcTags.write(tag, NfcTags.message(packageName, mode))
-            runOnUiThread {
-                // Bewusst als Toast: Der Hinweis muss auch über dem geöffneten Dialog sichtbar sein.
-                if (error == null) {
-                    Toast.makeText(this, "Tag beschrieben – ab jetzt einfach mit entsperrtem Handy scannen.", Toast.LENGTH_LONG).show()
-                    cancelTagWrite()
-                } else {
-                    Toast.makeText(this, error, Toast.LENGTH_LONG).show()
-                }
-            }
-        }, flags, null)
     }
 }
 
@@ -176,36 +100,21 @@ private enum class Tab(val label: String, @DrawableRes val icon: Int, @DrawableR
 }
 
 @Composable
-private fun AppRoot(
-    resumeCount: Int,
-    tagWriteMode: StampEngine.Mode?,
-    onStartTagWrite: (StampEngine.Mode) -> Unit,
-    onCancelTagWrite: () -> Unit,
-    incomingFile: Uri?,
-    onIncomingHandled: () -> Unit,
-) {
+private fun AppRoot(resumeCount: Int) {
     val snackbars = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val messenger = remember { Messenger(snackbars, scope) }
     CompositionLocalProvider(LocalMessenger provides messenger) {
         // Die Oberfläche erscheint, sobald die Daten geladen sind (wenige Millisekunden).
         ProvideAppData {
-            AppContent(snackbars, resumeCount, tagWriteMode, onStartTagWrite, onCancelTagWrite, incomingFile, onIncomingHandled)
+            AppContent(snackbars, resumeCount)
         }
     }
 }
 
 /** Tabs, Navigation und Rückmeldungen. */
 @Composable
-private fun AppContent(
-    snackbars: SnackbarHostState,
-    resumeCount: Int,
-    tagWriteMode: StampEngine.Mode?,
-    onStartTagWrite: (StampEngine.Mode) -> Unit,
-    onCancelTagWrite: () -> Unit,
-    incomingFile: Uri?,
-    onIncomingHandled: () -> Unit,
-) {
+private fun AppContent(snackbars: SnackbarHostState, resumeCount: Int) {
     var tab by rememberSaveable { mutableStateOf(Tab.HEUTE) }
     var settingsPage by rememberSaveable { mutableStateOf(SettingsPage.HOME) }
     var reconcileMonth by rememberSaveable { mutableStateOf<String?>(null) }
@@ -230,20 +139,12 @@ private fun AppContent(
         tab = Tab.ABGLEICH
     }
 
-    // Ändert sich die automatische Erfassung (WLAN-Namen, Arbeitsort, an/aus) – egal ob in den Optionen oder durch
-    // eine eingelesene Sicherung –, werden Hintergrunddienst und Geofence neu eingerichtet.
+    // Ändert sich die automatische Erfassung (WLAN-Namen, Arbeitsort, an/aus), werden Hintergrunddienst und
+    // Geofence neu eingerichtet.
     val captureSetup = remember(settingsVersion) {
         listOf(settings.wifiEnabled, settings.wifiSsids, settings.geoEnabled, settings.geoLat, settings.geoLon, settings.geoRadius)
     }
     LaunchedEffect(captureSetup) { MonitorService.start(context) }
-
-    // Datei von außen (Sicherung antippen / teilen): direkt die Vorschau öffnen.
-    LaunchedEffect(incomingFile) {
-        if (incomingFile != null) {
-            importer.open(incomingFile)
-            onIncomingHandled()
-        }
-    }
 
     // Zurück: erst aus der Unterseite, dann zum Start-Tab, erst dann schließt die App.
     val inSubPage = tab == Tab.OPTIONEN && settingsPage != SettingsPage.HOME
@@ -330,8 +231,8 @@ private fun AppContent(
                             when (source) {
                                 StampSource.WLAN -> SettingsPage.WIFI
                                 StampSource.GEOFENCE -> SettingsPage.GEO
-                                StampSource.NFC -> SettingsPage.NFC
-                                StampSource.MANUELL -> SettingsPage.MANUAL
+                                // NFC wird nicht mehr erfasst; die Kachel gibt es auf „Heute“ nicht mehr.
+                                StampSource.NFC, StampSource.MANUELL -> SettingsPage.MANUAL
                             },
                         )
                     },
@@ -354,9 +255,6 @@ private fun AppContent(
                     page = settingsPage,
                     onPage = { settingsPage = it },
                     resumeCount = resumeCount,
-                    tagWriteMode = tagWriteMode,
-                    onStartTagWrite = onStartTagWrite,
-                    onCancelTagWrite = onCancelTagWrite,
                     importer = importer,
                     onShowReconcile = { confirmed -> openReconcile(confirmed) },
                 )
@@ -367,7 +265,5 @@ private fun AppContent(
     ImportHost(
         controller = importer,
         onTimesImported = { month -> openReconcile(confirmed = false, month = month) },
-        onOpenSetup = { openSettings(SettingsPage.SETUP) },
-        onOpenHistory = { tab = Tab.VERLAUF },
     )
 }

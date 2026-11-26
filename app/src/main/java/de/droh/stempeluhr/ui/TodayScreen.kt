@@ -159,7 +159,7 @@ fun TodayScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionLabel("Quellen")
                 // Erst die automatischen Quellen, dann die, die man selbst auslöst.
-                listOf(StampSource.WLAN, StampSource.GEOFENCE, StampSource.NFC, StampSource.MANUELL).chunked(2).forEach { pair ->
+                listOf(StampSource.WLAN, StampSource.GEOFENCE, StampSource.MANUELL).chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         pair.forEach { src ->
                             SourceTile(
@@ -482,8 +482,8 @@ private fun sourceStatus(source: StampSource, settings: Settings, settingsVersio
                     else -> SourceStatus(if (wifi) "getrennt" else "entfernt", true, SourceStatus.Tone.NEUTRAL)
                 }
             }
-            StampSource.NFC ->
-                if (settings.nfcEnabled) SourceStatus("bereit", true, SourceStatus.Tone.NEUTRAL) else SourceStatus("aus", false, SourceStatus.Tone.NEUTRAL)
+            // NFC wird nicht mehr erfasst (nur noch in älteren Einträgen vorhanden).
+            StampSource.NFC -> SourceStatus("aus", false, SourceStatus.Tone.NEUTRAL)
             StampSource.MANUELL -> SourceStatus("bereit", true, SourceStatus.Tone.NEUTRAL)
         }
     }

@@ -9,7 +9,6 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.net.wifi.WifiManager
-import android.nfc.NfcAdapter
 import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,11 +59,11 @@ import androidx.compose.ui.unit.dp
 import de.droh.stempeluhr.R
 import de.droh.stempeluhr.core.CsvExport
 import de.droh.stempeluhr.core.Summary
+import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.TimeFormat
-import de.droh.stempeluhr.data.BackupStore
+import de.droh.stempeluhr.data.FileShare
 import de.droh.stempeluhr.data.Settings
 import de.droh.stempeluhr.data.StampDb
-import de.droh.stempeluhr.engine.StampEngine
 import de.droh.stempeluhr.geo.GeofenceManager
 import de.droh.stempeluhr.service.MonitorService
 import de.droh.stempeluhr.tile.StampTileService
@@ -91,8 +90,6 @@ fun ColumnScope.SetupPage(resumeCount: Int, settingsVersion: Long) {
     val bgOk = remember(key, refresh) { SetupCheck.backgroundLocationOk(context) }
     val batteryOk = remember(key, refresh) { SetupCheck.batteryOk(context) }
     val locOk = remember(key, refresh) { SetupCheck.locationServiceOk(context) }
-    val hasNfc = remember { NfcAdapter.getDefaultAdapter(context) != null }
-    val nfcOk = remember(key, refresh) { SetupCheck.nfcOk(context) }
     val issues = remember(key, refresh) { SetupCheck.issues(context) }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
@@ -103,7 +100,7 @@ fun ColumnScope.SetupPage(resumeCount: Int, settingsVersion: Long) {
     }
 
     val showNotif = Build.VERSION.SDK_INT >= 33
-    val checks = listOfNotNull(notifOk.takeIf { showNotif }, fineOk, bgOk, locOk, batteryOk, nfcOk.takeIf { hasNfc })
+    val checks = listOfNotNull(notifOk.takeIf { showNotif }, fineOk, bgOk, locOk, batteryOk)
     val done = checks.count { it }
     val allOk = done == checks.size
 
@@ -165,12 +162,6 @@ fun ColumnScope.SetupPage(resumeCount: Int, settingsVersion: Long) {
         RowDivider()
         CheckRow("Akku-Optimierung aus", "Sonst beendet Android die Erfassung im Hintergrund.", batteryOk, "Ausschalten") {
             requestBatteryExemption(context)
-        }
-        if (hasNfc) {
-            RowDivider()
-            CheckRow("NFC eingeschaltet", "Zum Stempeln mit einem NFC-Aufkleber.", nfcOk, "Öffnen") {
-                context.startActivity(Intent(AndroidSettings.ACTION_NFC_SETTINGS))
-            }
         }
     }
 
@@ -473,84 +464,6 @@ fun ColumnScope.GeoPage(settings: Settings, settingsVersion: Long) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// NFC
-// ---------------------------------------------------------------------------------------------
-
-// settingsVersion ist nur Schlüssel fürs Neuzeichnen (die Settings-Instanz bleibt gleich).
-@Suppress("UNUSED_PARAMETER")
-@Composable
-fun ColumnScope.NfcPage(
-    settings: Settings,
-    settingsVersion: Long,
-    tagWriteMode: StampEngine.Mode?,
-    onStartTagWrite: (StampEngine.Mode) -> Unit,
-    onCancelTagWrite: () -> Unit,
-) {
-    RowGroup {
-        SwitchRow(
-            "NFC-Stempeln",
-            subtitle = "Sekundengenau – das Handy muss dafür entsperrt sein",
-            checked = settings.nfcEnabled,
-            onChange = { settings.nfcEnabled = it },
-            icon = R.drawable.ic_nfc,
-            iconColor = App.colors.violet,
-        )
-    }
-
-    SectionLabel("Tag beschreiben")
-    RowGroup {
-        ListRow(
-            "Umschalten",
-            subtitle = "Ein Tag für beides: abwechselnd Kommen und Gehen",
-            icon = R.drawable.ic_sync,
-            iconColor = App.colors.violet,
-            onClick = { onStartTagWrite(StampEngine.Mode.TOGGLE) },
-        ) { Chevron() }
-        RowDivider()
-        ListRow(
-            "Nur Kommen",
-            subtitle = "Eigener Tag für den Eingang",
-            icon = R.drawable.ic_in,
-            iconColor = App.colors.good,
-            onClick = { onStartTagWrite(StampEngine.Mode.IN) },
-        ) { Chevron() }
-        RowDivider()
-        ListRow(
-            "Nur Gehen",
-            subtitle = "Eigener Tag für den Ausgang",
-            icon = R.drawable.ic_out,
-            iconColor = App.colors.bad,
-            onClick = { onStartTagWrite(StampEngine.Mode.OUT) },
-        ) { Chevron() }
-    }
-    Hint(
-        "Einen NFC-Aufkleber (NTAG213/215) neben die Stechuhr kleben und hier beschreiben. Danach genügt es, das entsperrte " +
-            "Handy an den Tag zu halten – die App muss nicht geöffnet sein.",
-    )
-
-    if (tagWriteMode != null) {
-        AlertDialog(
-            onDismissRequest = onCancelTagWrite,
-            icon = { IconBubble(R.drawable.ic_nfc, App.colors.violet, size = 56.dp) },
-            title = { Text("Tag an die Rückseite halten", textAlign = TextAlign.Center) },
-            text = {
-                val label = when (tagWriteMode) {
-                    StampEngine.Mode.TOGGLE -> "Umschalten (Kommen und Gehen abwechselnd)"
-                    StampEngine.Mode.IN -> "nur Kommen"
-                    StampEngine.Mode.OUT -> "nur Gehen"
-                }
-                Text(
-                    "Der NFC-Tag wird beschrieben, sobald er die Rückseite des Handys berührt.\n\nModus: $label",
-                    textAlign = TextAlign.Center,
-                )
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = onCancelTagWrite) { Text("Abbrechen") } },
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
 // Kachel & manuell
 // ---------------------------------------------------------------------------------------------
 
@@ -668,16 +581,22 @@ fun ColumnScope.RulesPage(settings: Settings, settingsVersion: Long) {
     }
 
     SectionLabel("Welche Quelle zählt für Kommen und Gehen?")
+    // NFC wird nicht mehr erfasst und deshalb nicht angeboten; ältere NFC-Einträge behalten ihren Rang.
+    val shown = priority.filter { it != StampSource.NFC }
+    fun move(from: Int, to: Int) {
+        val reordered = shown.toMutableList().apply { add(to, removeAt(from)) }.iterator()
+        settings.priority = priority.map { if (it == StampSource.NFC) it else reordered.next() }
+    }
     RowGroup {
-        priority.forEachIndexed { index, src ->
+        shown.forEachIndexed { index, src ->
             if (index > 0) RowDivider()
             ListRow("${index + 1}. ${sourceName(src)}", icon = sourceIcon(src), iconColor = sourceColor(src)) {
-                IconButton(enabled = index > 0, onClick = {
-                    settings.priority = priority.toMutableList().apply { add(index - 1, removeAt(index)) }
-                }) { AppIcon(R.drawable.ic_arrow_up, "${sourceName(src)} nach oben") }
-                IconButton(enabled = index < priority.lastIndex, onClick = {
-                    settings.priority = priority.toMutableList().apply { add(index + 1, removeAt(index)) }
-                }) { AppIcon(R.drawable.ic_arrow_down, "${sourceName(src)} nach unten") }
+                IconButton(enabled = index > 0, onClick = { move(index, index - 1) }) {
+                    AppIcon(R.drawable.ic_arrow_up, "${sourceName(src)} nach oben")
+                }
+                IconButton(enabled = index < shown.lastIndex, onClick = { move(index, index + 1) }) {
+                    AppIcon(R.drawable.ic_arrow_down, "${sourceName(src)} nach unten")
+                }
             }
         }
     }
@@ -767,152 +686,6 @@ fun ColumnScope.StudentPage(settings: Settings, settingsVersion: Long) {
             onDismiss = { editWeeks = false },
             onSave = { settings.studentLimitWeeks = it },
         )
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Auf neues Handy übertragen
-// ---------------------------------------------------------------------------------------------
-
-@Composable
-fun ColumnScope.TransferPage(importer: ImportController, onOpenExport: () -> Unit) {
-    val context = LocalContext.current
-    val messenger = LocalMessenger.current
-    val scope = rememberCoroutineScope()
-    val events by rememberAllEvents()
-    val imported by rememberImportedDays()
-    var working by remember { mutableStateOf(false) }
-    // Vorbelegung: Ein Handy ohne Daten ist vermutlich das neue.
-    var isNew by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    val newPhone = isNew ?: (events.isEmpty() && imported.isEmpty())
-
-    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) {
-            working = true
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) { BackupStore.write(context, uri, BackupStore.snapshot(context)) }
-                    messenger.show("Sicherung gespeichert.")
-                } catch (e: Exception) {
-                    messenger.show("Speichern fehlgeschlagen: ${e.message ?: e.javaClass.simpleName}", long = true)
-                } finally {
-                    working = false
-                }
-            }
-        }
-    }
-
-    AppCard(container = MaterialTheme.colorScheme.primaryContainer) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconBubble(R.drawable.ic_phone_send, MaterialTheme.colorScheme.primary, size = 48.dp, container = MaterialTheme.colorScheme.surfaceContainerLow)
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text("Alles mitnehmen", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(
-                    "Eine Sicherung enthält alle Ereignisse, die importierten Stundenzettel und die Einstellungen.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
-    }
-
-    SectionLabel("Dieses Handy ist …")
-    SegmentedChoice(
-        options = listOf(false, true),
-        selected = newPhone,
-        onSelect = { isNew = it },
-        label = { if (it) "das neue" else "das alte" },
-        icon = { if (it) R.drawable.ic_phone_receive else R.drawable.ic_phone_send },
-    )
-
-    if (!newPhone) {
-        AppCard {
-            CardTitle("Sicherung senden")
-            Text(
-                "Enthält ${TimeFormat.plural(events.size, "Ereignis", "Ereignisse")}, " +
-                    "${TimeFormat.plural(imported.size, "importierten Tag", "importierte Tage")} und die Einstellungen dieses Handys.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            PrimaryButton(
-                if (working) "Erstelle Sicherung …" else "Sicherung senden",
-                icon = R.drawable.ic_share,
-                enabled = !working,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    working = true
-                    scope.launch {
-                        try {
-                            val intent = withContext(Dispatchers.IO) { BackupStore.shareIntent(context, BackupStore.snapshot(context)) }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            messenger.show("Senden fehlgeschlagen: ${e.message ?: e.javaClass.simpleName}", long = true)
-                        } finally {
-                            working = false
-                        }
-                    }
-                },
-            )
-            QuietButton(
-                "Als Datei speichern",
-                icon = R.drawable.ic_download,
-                enabled = !working,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { saveLauncher.launch(de.droh.stempeluhr.core.Backup.fileName(LocalDate.now())) },
-            )
-            Hint("Am einfachsten: im Teilen-Dialog „Quick Share“ wählen und das neue Handy antippen.")
-        }
-    } else {
-        AppCard {
-            CardTitle("Sicherung einlesen")
-            Text(
-                "Die empfangene Datei antippen und „Stempeluhr“ wählen – oder sie hier auswählen. " +
-                    "Vor dem Übernehmen siehst du genau, was dazukommt.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            PrimaryButton(
-                if (importer.busy) "Lese Datei …" else "Sicherung auswählen",
-                icon = R.drawable.ic_file_open,
-                enabled = !importer.busy,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = importer::pick,
-            )
-            Hint("Quick Share legt empfangene Dateien unter „Downloads → Quick Share“ ab.")
-        }
-    }
-
-    SectionLabel("Gut zu wissen")
-    AppCard(spacing = 12.dp) {
-        Fact(R.drawable.ic_shield, "Nichts geht verloren", "Einlesen ergänzt nur. Was auf dem Handy schon erfasst ist, bleibt; doppelte Einträge werden übersprungen. Die Sicherung kann beliebig oft eingelesen werden.")
-        Fact(R.drawable.ic_settings, "Berechtigungen neu erteilen", "Standort, Benachrichtigungen und Akku-Ausnahme gelten nur für ein Handy. Auf dem neuen bitte unter „Einrichtung“ prüfen.")
-        Fact(R.drawable.ic_info, "Nur an eigene Geräte senden", "Die Datei enthält deine Arbeitszeiten, den WLAN-Namen und den Arbeitsort.")
-    }
-    AppCard {
-        CardTitle("Altes Handy hat noch die alte App-Version?")
-        Text(
-            "Dann gibt es dort diese Seite noch nicht. Zwei Wege:\n" +
-                "1. Auf dem alten Handy die App aktualisieren und danach die Sicherung senden.\n" +
-                "2. Oder dort unter Optionen → Export die „Rohdaten“ speichern und die CSV-Datei hier unter " +
-                "„Sicherung auswählen“ einlesen. Das überträgt alle Ereignisse – Einstellungen und importierte " +
-                "Stundenzettel kommen nur mit der Sicherung herüber.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(onClick = onOpenExport) { Text("Zum Export auf diesem Handy") }
-    }
-}
-
-@Composable
-private fun Fact(@DrawableRes icon: Int, title: String, text: String) {
-    Row {
-        AppIcon(icon, tint = MaterialTheme.colorScheme.primary, size = 22.dp)
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 
@@ -1020,7 +793,7 @@ fun ColumnScope.ImportPage(
             text = {
                 Text(
                     "${TimeFormat.plural(imported.size, "importierter Tag wird", "importierte Tage werden")} entfernt. " +
-                        "Eigene Erfassungen (WLAN, Standort, NFC, manuell) bleiben erhalten.",
+                        "Eigene Erfassungen (WLAN, Standort, manuell) bleiben erhalten.",
                 )
             },
             confirmButton = {
@@ -1066,7 +839,7 @@ fun ColumnScope.ExportPage(settings: Settings) {
 
     fun share(name: String, text: String) {
         try {
-            context.startActivity(BackupStore.shareTextFile(context, name, "text/csv", text, "Export senden"))
+            context.startActivity(FileShare.textFile(context, name, "text/csv", text, "Export senden"))
         } catch (e: Exception) {
             messenger.show("Senden fehlgeschlagen: ${e.message}", long = true)
         }
@@ -1094,11 +867,6 @@ fun ColumnScope.ExportPage(settings: Settings) {
         onShare = { share("Stempeluhr-Tage-$today.csv", dailyCsv()) },
     )
     Hint("CSV für Excel: Semikolon als Trenner, Dezimalkomma, Umlaute bleiben erhalten.")
-    Hint(
-        "Für den Wechsel auf ein anderes Handy ist „Auf neues Handy übertragen“ besser: Die Sicherung nimmt auch " +
-            "Einstellungen und importierte Stundenzettel mit.",
-        icon = R.drawable.ic_phone_send,
-    )
 }
 
 @Composable

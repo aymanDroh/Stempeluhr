@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -43,13 +44,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.droh.stempeluhr.R
 import de.droh.stempeluhr.core.DaySummary
+import de.droh.stempeluhr.core.MonthFold
+import de.droh.stempeluhr.core.PeriodTotal
 import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.StampType
@@ -97,6 +102,16 @@ fun HistoryScreen(modifier: Modifier) {
     val openDays = remember(allDays, today) { allDays.filter { it.incomplete && it.summary.date != today } }
     val days = if (onlyOpen) openDays else allDays
     val months = remember(days) { days.groupBy { YearMonth.from(it.summary.date) } }
+    // Die Monatssummen zählen immer alle Tage des Monats – auch wenn der Filter nur einzelne Tage zeigt.
+    val monthTotals = remember(allDays, target) {
+        allDays.groupBy { YearMonth.from(it.summary.date) }
+            .mapValues { (_, list) -> MonthTotal(list.size, Summary.total(list.map { it.summary }, target)) }
+    }
+    val folds = remember(settingsVersion) { settings.monthFolds }
+    val newestMonth = monthTotals.keys.maxOrNull()
+    // Beim Filter „Gehen fehlt“ geht es um einzelne Tage – dort ist immer alles aufgeklappt.
+    fun collapsed(month: YearMonth) = !onlyOpen && MonthFold.isCollapsed(month, newestMonth, folds)
+    val allCollapsed = monthTotals.keys.all { MonthFold.isCollapsed(it, newestMonth, folds) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -123,6 +138,13 @@ fun HistoryScreen(modifier: Modifier) {
                         },
                     )
                 }
+                if (!onlyOpen && monthTotals.isNotEmpty()) {
+                    SectionLabel(TimeFormat.plural(monthTotals.size, "Monat", "Monate")) {
+                        TextButton(onClick = { settings.monthFolds = MonthFold.all(monthTotals.keys, collapsed = !allCollapsed) }) {
+                            Text(if (allCollapsed) "Alle aufklappen" else "Alle zuklappen")
+                        }
+                    }
+                }
             }
         }
         if (days.isEmpty()) {
@@ -141,9 +163,22 @@ fun HistoryScreen(modifier: Modifier) {
             }
         }
         months.forEach { (month, monthDays) ->
+            val isCollapsed = collapsed(month)
+            val total = monthTotals.getValue(month)
             stickyHeader(key = "m$month") {
-                MonthHeader(month, monthDays.map { it.summary }, target)
+                MonthHeader(
+                    month = month,
+                    total = total.period,
+                    subtitle = if (onlyOpen) {
+                        "${monthDays.size} von ${TimeFormat.plural(total.dayCount, "Tag", "Tagen")} ohne Gehen"
+                    } else {
+                        "${TimeFormat.plural(total.period.days, "Tag", "Tage")} · Soll ${TimeFormat.hm(target.toLong())} h/Tag"
+                    },
+                    collapsed = isCollapsed,
+                    onToggle = if (onlyOpen) null else ({ settings.monthFolds = folds + (month to !isCollapsed) }),
+                )
             }
+            if (isCollapsed) return@forEach
             items(monthDays, key = { it.summary.date.toString() }) { entry ->
                 val key = entry.summary.date.toString()
                 Box(Modifier.animateItem().padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -172,32 +207,74 @@ fun HistoryScreen(modifier: Modifier) {
     EventDialogsHost(dialogs)
 }
 
-/** Monatszeile, die beim Scrollen oben stehen bleibt. */
+/** Summe eines Monats über alle seine Tage. */
+private class MonthTotal(val dayCount: Int, val period: PeriodTotal)
+
+/**
+ * Monatszeile mit Stunden und Saldo. Antippen klappt die Tage des Monats auf oder zu; zugeklappt stehen die Monate
+ * direkt untereinander. Beim Scrollen bleibt die Zeile oben stehen.
+ */
 @Composable
-private fun MonthHeader(month: YearMonth, days: List<DaySummary>, target: Int) {
-    val total = Summary.total(days, target)
-    Row(
+private fun MonthHeader(month: YearMonth, total: PeriodTotal, subtitle: String, collapsed: Boolean, onToggle: (() -> Unit)?) {
+    val rotation by animateFloatAsState(if (collapsed) 0f else 180f, label = "monthChevron")
+    Box(
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(TimeFormat.month(month.atDay(1)), style = MaterialTheme.typography.titleLarge)
-            Text(
-                "${TimeFormat.plural(total.days, "Tag", "Tage")} · Soll ${TimeFormat.hm(target.toLong())} h/Tag",
-                style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("${TimeFormat.hm(total.minutes)} h", style = MaterialTheme.typography.titleLarge.merge(TabularNumbers))
-            Text(
-                "Saldo ${TimeFormat.signedHm(total.saldoMinutes)}",
-                style = MaterialTheme.typography.labelMedium.merge(TabularNumbers),
-                color = if (total.saldoMinutes >= 0) App.colors.good else App.colors.bad,
-            )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .then(
+                    if (onToggle != null) {
+                        Modifier
+                            .clickable(
+                                onClickLabel = if (collapsed) "Tage anzeigen" else "Tage ausblenden",
+                                role = Role.Button,
+                                onClick = onToggle,
+                            )
+                            .semantics { stateDescription = if (collapsed) "zugeklappt" else "aufgeklappt" }
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(start = 16.dp, end = if (onToggle != null) 10.dp else 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val content = MaterialTheme.colorScheme.onSecondaryContainer
+            Column(Modifier.weight(1f)) {
+                Text(
+                    TimeFormat.month(month.atDay(1)),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = content,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall.merge(TabularNumbers),
+                    color = content.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text("${TimeFormat.hm(total.minutes)} h", style = MaterialTheme.typography.titleLarge.merge(TabularNumbers), color = content, maxLines = 1)
+                Text(
+                    "Saldo ${TimeFormat.signedHm(total.saldoMinutes)}",
+                    style = MaterialTheme.typography.labelMedium.merge(TabularNumbers),
+                    color = content,
+                    maxLines = 1,
+                )
+            }
+            if (onToggle != null) {
+                AppIcon(R.drawable.ic_expand, tint = content, modifier = Modifier.padding(start = 6.dp).rotate(rotation), size = 24.dp)
+            }
         }
     }
 }

@@ -22,9 +22,6 @@ import java.time.ZoneId
 object StampEngine {
     private val handler = Handler(Looper.getMainLooper())
 
-    /** NFC-Doppel-Lesungen innerhalb dieser Zeit werden ignoriert. */
-    private const val NFC_REPEAT_MS = 30_000L
-
     // ---------- Automatische Quellen (WLAN, Geofence) ----------
 
     @Synchronized
@@ -90,13 +87,13 @@ object StampEngine {
         handler.postDelayed({ tick(app) }, delayMs + 1_000L)
     }
 
-    // ---------- Genaue Quellen (NFC, Manuell) ----------
+    // ---------- Manuelles Stempeln (Knopf in der App, Kachel) ----------
 
     enum class Mode { TOGGLE, IN, OUT }
 
     /**
-     * Speichert ein NFC- oder manuelles Ereignis.
-     * @return die gespeicherte Art oder null, wenn es als Doppel-Lesung ignoriert wurde.
+     * Speichert ein manuelles Ereignis.
+     * @return die gespeicherte Art.
      */
     fun precise(
         context: Context,
@@ -114,10 +111,6 @@ object StampEngine {
         ts: Long = System.currentTimeMillis(),
     ): StampEvent? {
         val db = StampDb.get(context)
-        if (source == StampSource.NFC) {
-            val last = db.lastOf(StampSource.NFC)
-            if (last != null && ts - last.ts in 0 until NFC_REPEAT_MS) return null
-        }
         val type = when (mode) {
             Mode.IN -> StampType.IN
             Mode.OUT -> StampType.OUT

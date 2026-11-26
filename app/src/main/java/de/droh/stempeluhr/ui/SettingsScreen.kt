@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
-import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.PowerManager
 import androidx.compose.animation.AnimatedContent
@@ -32,9 +31,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import de.droh.stempeluhr.R
+import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.TimeFormat
 import de.droh.stempeluhr.data.Settings
-import de.droh.stempeluhr.engine.StampEngine
 
 /** Prüft, was für die automatische Erfassung noch fehlt. */
 object SetupCheck {
@@ -46,20 +45,18 @@ object SetupCheck {
     fun backgroundLocationOk(c: Context) = granted(c, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
     fun batteryOk(c: Context) = c.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName)
     fun locationServiceOk(c: Context) = c.getSystemService(LocationManager::class.java).isLocationEnabled
-    fun nfcOk(c: Context) = NfcAdapter.getDefaultAdapter(c)?.isEnabled == true
 
     fun issues(c: Context): List<String> {
         val s = Settings.get(c)
         val auto = s.wifiEnabled || s.geoEnabled
         return buildList {
-            if (!s.wifiEnabled && !s.geoEnabled && !s.nfcEnabled) add("Keine Erfassungsart eingeschaltet")
+            if (!s.wifiEnabled && !s.geoEnabled) add("Keine automatische Erfassung eingeschaltet")
             if (s.wifiEnabled && s.wifiSsidSet.isEmpty()) add("Kein Arbeits-WLAN eingetragen")
             if (s.geoEnabled && (s.geoLat == null || s.geoLon == null)) add("Kein Arbeitsort festgelegt")
             if (auto && !fineLocationOk(c)) add("Standort-Berechtigung fehlt")
             if (auto && !backgroundLocationOk(c)) add("Standort „Immer erlauben“ fehlt")
             if (auto && !locationServiceOk(c)) add("Standortdienst (GPS) ist ausgeschaltet")
             if (auto && !batteryOk(c)) add("Akku-Optimierung ist noch aktiv")
-            if (s.nfcEnabled && NfcAdapter.getDefaultAdapter(c) != null && !nfcOk(c)) add("NFC ist ausgeschaltet")
         }
     }
 }
@@ -70,11 +67,9 @@ enum class SettingsPage(val title: String) {
     SETUP("Einrichtung"),
     WIFI("WLAN"),
     GEO("Standort"),
-    NFC("NFC-Tag"),
     MANUAL("Kachel & manuell"),
     RULES("Arbeitszeit & Wertung"),
     STUDENT("Werkstudent"),
-    TRANSFER("Auf neues Handy übertragen"),
     IMPORT("Stundenzettel importieren"),
     EXPORT("Export"),
 }
@@ -85,9 +80,6 @@ fun SettingsScreen(
     page: SettingsPage,
     onPage: (SettingsPage) -> Unit,
     resumeCount: Int,
-    tagWriteMode: StampEngine.Mode?,
-    onStartTagWrite: (StampEngine.Mode) -> Unit,
-    onCancelTagWrite: () -> Unit,
     importer: ImportController,
     onShowReconcile: (showConfirmed: Boolean) -> Unit,
 ) {
@@ -109,13 +101,9 @@ fun SettingsScreen(
             SettingsPage.SETUP -> SubPage(current, back) { SetupPage(resumeCount, settingsVersion) }
             SettingsPage.WIFI -> SubPage(current, back) { WifiPage(settings, settingsVersion) }
             SettingsPage.GEO -> SubPage(current, back) { GeoPage(settings, settingsVersion) }
-            SettingsPage.NFC -> SubPage(current, back) {
-                NfcPage(settings, settingsVersion, tagWriteMode, onStartTagWrite, onCancelTagWrite)
-            }
             SettingsPage.MANUAL -> SubPage(current, back) { ManualPage() }
             SettingsPage.RULES -> SubPage(current, back) { RulesPage(settings, settingsVersion) }
             SettingsPage.STUDENT -> SubPage(current, back) { StudentPage(settings, settingsVersion) }
-            SettingsPage.TRANSFER -> SubPage(current, back) { TransferPage(importer, onOpenExport = { onPage(SettingsPage.EXPORT) }) }
             SettingsPage.IMPORT -> SubPage(current, back) { ImportPage(settings, settingsVersion, importer, onShowReconcile) }
             SettingsPage.EXPORT -> SubPage(current, back) { ExportPage(settings) }
         }
@@ -214,14 +202,6 @@ private fun SettingsHome(
             ) { Chevron() }
             RowDivider()
             ListRow(
-                "NFC-Tag",
-                subtitle = if (settings.nfcEnabled) "$on · Handy an den Aufkleber halten" else off,
-                icon = R.drawable.ic_nfc,
-                iconColor = App.colors.violet,
-                onClick = { onPage(SettingsPage.NFC) },
-            ) { Chevron() }
-            RowDivider()
-            ListRow(
                 "Kachel & manuell",
                 subtitle = "Stempeln aus den Schnelleinstellungen",
                 icon = R.drawable.ic_manual,
@@ -235,7 +215,7 @@ private fun SettingsHome(
             ListRow(
                 "Arbeitszeit & Wertung",
                 subtitle = "Soll ${TimeFormat.hm(settings.targetMinutes.toLong())} h · Verzögerung ${settings.leaveDelayMinutes} min · " +
-                    "zuerst zählt ${sourceName(settings.priority.first())}",
+                    "zuerst zählt ${sourceName(settings.priority.first { it != StampSource.NFC })}",
                 icon = R.drawable.ic_flag,
                 onClick = { onPage(SettingsPage.RULES) },
             ) { Chevron() }
@@ -250,13 +230,6 @@ private fun SettingsHome(
 
         SectionLabel("Daten")
         RowGroup {
-            ListRow(
-                "Auf neues Handy übertragen",
-                subtitle = "Alle Daten und Einstellungen als Sicherung senden oder einlesen",
-                icon = R.drawable.ic_phone_send,
-                onClick = { onPage(SettingsPage.TRANSFER) },
-            ) { Chevron() }
-            RowDivider()
             ListRow(
                 "Stundenzettel importieren",
                 subtitle = if (imported.isEmpty()) {

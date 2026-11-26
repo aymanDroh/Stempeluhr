@@ -78,6 +78,4 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     testImplementation("junit:junit:4.13.2")
-    // org.json gehört auf dem Handy zu Android; für Unit-Tests auf dem PC braucht es eine eigene Kopie.
-    testImplementation("org.json:json:20240303")
 }

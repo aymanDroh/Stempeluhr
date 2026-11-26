@@ -5,13 +5,9 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import de.droh.stempeluhr.core.Backup
-import de.droh.stempeluhr.core.BackupData
-import de.droh.stempeluhr.core.BackupImportedDay
 import de.droh.stempeluhr.core.EventKey
 import de.droh.stempeluhr.core.ImportedDay
 import de.droh.stempeluhr.core.RawRow
-import de.droh.stempeluhr.core.RestorePlan
 import de.droh.stempeluhr.core.StampEvent
 import de.droh.stempeluhr.core.StampSource
 import de.droh.stempeluhr.core.StampType
@@ -120,27 +116,6 @@ class StampDb private constructor(context: Context) :
         notifyChanged()
     }
 
-    /** Importierte Tage mit Herkunft und Import-Zeitpunkt (für die Sicherung). */
-    @Synchronized
-    fun importedDaysFull(): List<BackupImportedDay> =
-        readableDatabase.query("imported_days", null, null, null, null, null, "date ASC").use { c ->
-            buildList {
-                val noteIdx = c.getColumnIndexOrThrow("note")
-                val sourceIdx = c.getColumnIndexOrThrow("source")
-                while (c.moveToNext()) {
-                    add(
-                        BackupImportedDay(
-                            date = LocalDate.parse(c.getString(c.getColumnIndexOrThrow("date"))),
-                            minutes = c.getLong(c.getColumnIndexOrThrow("minutes")),
-                            note = if (c.isNull(noteIdx)) null else c.getString(noteIdx),
-                            source = if (c.isNull(sourceIdx)) null else c.getString(sourceIdx),
-                            importedAt = c.getLong(c.getColumnIndexOrThrow("imported_at")),
-                        ),
-                    )
-                }
-            }
-        }
-
     /** Daten aller importierten Tage (zum Erkennen bereits vorhandener Tage). */
     @Synchronized
     fun importedDates(): Set<LocalDate> =
@@ -158,48 +133,6 @@ class StampDb private constructor(context: Context) :
                 }
             }
         }
-
-    /**
-     * Führt eine Sicherung mit den vorhandenen Daten zusammen: Fehlendes wird ergänzt, Vorhandenes bleibt
-     * unverändert, gelöscht wird nichts. Der Abgleich läuft erst hier, direkt vor dem Schreiben, damit
-     * zwischenzeitlich erfasste Ereignisse berücksichtigt sind.
-     * @return was tatsächlich ergänzt bzw. übersprungen wurde.
-     */
-    @Synchronized
-    fun restoreBackup(data: BackupData): RestorePlan {
-        val plan = Backup.plan(data, eventKeys(), importedDates())
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            for (e in plan.newEvents) {
-                val values = ContentValues().apply {
-                    put("ts", e.ts)
-                    put("type", e.type.name)
-                    put("source", e.source.name)
-                    put("note", e.note)
-                    put("created_at", e.createdAt)
-                    if (e.originalTs != null) put("original_ts", e.originalTs)
-                    put("deleted", if (e.deleted) 1 else 0)
-                }
-                db.insertOrThrow("events", null, values)
-            }
-            for (d in plan.newDays) {
-                val values = ContentValues().apply {
-                    put("date", d.date.toString())
-                    put("minutes", d.minutes)
-                    put("note", d.note)
-                    put("source", d.source)
-                    put("imported_at", d.importedAt)
-                }
-                db.insertOrThrow("imported_days", null, values)
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-        notifyChanged()
-        return plan
-    }
 
     /**
      * Stellt Ereignisse aus dem eigenen Rohdaten-Export wieder her. Bereits vorhandene werden übersprungen

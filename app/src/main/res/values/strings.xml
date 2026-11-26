@@ -2,5 +2,4 @@
 <resources>
     <string name="app_name">Stempeluhr</string>
     <string name="tile_label">Stempeln</string>
-    <string name="open_backup_label">Sicherung einlesen</string>
 </resources>

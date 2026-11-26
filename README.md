@@ -2,8 +2,7 @@
 
 Private Android-App (für Samsung Galaxy, z. B. S22 und S25), die die eigenen Arbeitszeiten
 **automatisch** mitschreibt, ohne Zugriff auf die Stechuhr der Firma zu haben. Die Daten liegen nur
-auf dem Handy, lassen sich als CSV für Excel exportieren und bei einem Handywechsel komplett auf das
-neue Gerät übertragen.
+auf dem Handy und lassen sich als CSV für Excel exportieren.
 
 ## Bedienung
 
@@ -11,15 +10,18 @@ Fünf Tabs am unteren Rand:
 
 - **Heute:** Zifferblatt mit der Arbeitszeit des Tages und dem Fortschritt zum Soll, dazu immer beide
   Knöpfe **Kommen** und **Gehen** (der naheliegende ist hervorgehoben). Nach dem Stempeln erscheint
-  unten eine Meldung mit **Rückgängig**. Darunter: Status der vier Quellen, die laufende Woche und
+  unten eine Meldung mit **Rückgängig**. Darunter: Status der drei Quellen, die laufende Woche und
   der Verlauf des Tages. Einträge werden durch Antippen bearbeitet.
-- **Verlauf:** alle Tage nach Monaten, mit Summe und Saldo. Filter **„Gehen fehlt“** zeigt nur die
-  Tage, an denen noch etwas nachzutragen ist.
+- **Verlauf:** alle Tage nach Monaten. Jeder Monat hat eine Zeile mit **Stunden und Saldo**; Antippen
+  klappt seine Tage auf oder zu. Zugeklappt stehen die Monate direkt untereinander – so sieht man auf
+  einen Blick, wie viel in welchem Monat gearbeitet wurde. Am Anfang ist nur der neueste Monat
+  aufgeklappt, **„Alle zuklappen“ / „Alle aufklappen“** schaltet alle auf einmal; die App merkt sich
+  die Wahl. Filter **„Gehen fehlt“** zeigt nur die Tage, an denen noch etwas nachzutragen ist.
 - **Wochen:** die 26-Wochen-Regel für Werkstudenten (siehe unten). Im Diagramm lässt sich jede
   Woche antippen.
 - **Abgleich:** erscheint, solange ein importierter Stundenzettel noch nicht bestätigt ist.
-- **Optionen:** Übersicht mit Unterseiten für Einrichtung, WLAN, Standort, NFC, Wertung, Import,
-  Export und den Umzug auf ein neues Handy. Unter „Darstellung“ lässt sich hell/dunkel festlegen.
+- **Optionen:** Übersicht mit Unterseiten für Einrichtung, WLAN, Standort, Kachel, Wertung, Import
+  und Export. Unter „Darstellung“ lässt sich hell/dunkel festlegen.
 
 ## Erfassungsarten
 
@@ -27,11 +29,13 @@ Fünf Tabs am unteren Rand:
 |---|---|---|---|
 | **WLAN** | Kommen = Verbindung mit dem Arbeits-WLAN, Gehen = getrennt | nein | gut (Betreten/Verlassen des Gebäudes) |
 | **Standort (Geofence)** | Kommen/Gehen beim Betreten/Verlassen eines Kreises um die Arbeit | nein | ca. 1–5 Minuten |
-| **NFC-Tag** | Aufkleber neben der Stechuhr, Handy dranhalten | **ja** (Android-Vorgabe) | sekundengenau |
 | **Manuell** | Buttons in der App, Kachel in den Schnelleinstellungen, Bearbeiten/Nachtragen | Kachel: nein | so genau wie man tippt |
 
 Alle Quellen werden parallel gespeichert. Für jeden Tag wird Kommen/Gehen nach einer einstellbaren
-Prioritätsliste gewertet (Standard: Manuell → NFC → WLAN → Standort). Alle anderen Zeiten bleiben sichtbar.
+Prioritätsliste gewertet (Standard: Manuell → WLAN → Standort). Alle anderen Zeiten bleiben sichtbar.
+
+Die frühere Erfassung per NFC-Aufkleber gibt es nicht mehr. Ältere NFC-Einträge bleiben gespeichert,
+werden weiter angezeigt und gewertet und lassen sich aus einem Rohdaten-Export wieder einlesen.
 
 Kurze WLAN- oder GPS-Aussetzer werden geglättet: Ein „weg“ zählt erst als Gehen, wenn die Quelle
 länger als die eingestellte Verzögerung (Standard 5 Minuten) weg bleibt. Das Gehen erhält dann den
@@ -62,8 +66,7 @@ Wochen in den Semesterferien zählen genauso mit. Grenze und Wochenzahl sind in 
   aus der Datei wird zur Kontrolle mit den gelesenen Tagen verglichen.
 - **CSV** mit Spalten `Datum` und `Dauer` (h:mm), optional `Bemerkung`.
 - **Rohdaten-Export dieser App:** stellt alle Ereignisse wieder her (ohne Einstellungen und
-  importierte Tage – dafür gibt es die Sicherung, siehe „Handywechsel“). Bereits vorhandene
-  Ereignisse werden sekundengenau erkannt und übersprungen.
+  importierte Tage). Bereits vorhandene Ereignisse werden sekundengenau erkannt und übersprungen.
 
 Vor dem Speichern zeigt die App eine Vorschau mit allen Monaten und allen nicht verstandenen Zeilen.
 Importierte Tage enthalten nur die Dauer. Bei Überschneidung mit der eigenen Erfassung zählt
@@ -86,31 +89,6 @@ mit der eigenen Erfassung verglichen:
 Dazu gibt es die Monatssummen beider Seiten, einen Filter „Nur Auffälligkeiten“ und einen CSV-Export
 des Abgleichs (z. B. zum Weitergeben an die Personalabteilung). Die Firmendaten enthalten nur die
 Dauer je Tag, deshalb wird die Dauer verglichen, nicht die Uhrzeit.
-
-## Handywechsel: Daten auf ein neues Handy übertragen
-
-*Optionen → Auf neues Handy übertragen*
-
-1. **Altes Handy:** „das alte“ wählen → **Sicherung senden**. Im Teilen-Dialog am einfachsten
-   *Quick Share* nehmen und das neue Handy antippen (alternativ „Als Datei speichern“ und die Datei
-   über Drive, USB oder E-Mail mitnehmen).
-2. **Neues Handy:** die empfangene Datei antippen und **Stempeluhr** wählen – oder in der App
-   „das neue“ → **Sicherung auswählen**. Eine Vorschau zeigt, wie viele Ereignisse und importierte
-   Tage neu dazukommen; erst mit **Einlesen** wird übernommen.
-
-Die Sicherung (`Stempeluhr-Sicherung-<Datum>.json`) enthält alle Ereignisse inklusive geänderter und
-gelöschter, die importierten Stundenzettel, die bestätigten Abgleiche und die Einstellungen
-(WLAN-Namen, Arbeitsort, Soll-Zeit, Regeln). Ob die Einstellungen übernommen werden, lässt sich in
-der Vorschau abschalten.
-
-- Einlesen **ergänzt nur**: Was auf dem neuen Handy schon erfasst ist, bleibt; Doppeltes wird
-  übersprungen. Dieselbe Sicherung kann beliebig oft eingelesen werden.
-- **Berechtigungen** (Standort, Benachrichtigungen, Akku-Ausnahme) und die Schnellkachel gelten nur
-  für ein Handy und müssen auf dem neuen neu eingerichtet werden (*Optionen → Einrichtung*).
-- Die Datei enthält Arbeitszeiten, WLAN-Namen und Arbeitsort – nur an eigene Geräte senden.
-- **Altes Handy hat noch eine ältere App-Version?** Entweder dort zuerst die App aktualisieren – oder
-  dort *Export → Rohdaten* speichern und die CSV-Datei auf dem neuen Handy über „Sicherung auswählen“
-  einlesen. Das überträgt die Ereignisse, aber nicht die Einstellungen und importierten Tage.
 
 ## Installation
 
@@ -142,9 +120,6 @@ Danach:
   Namen eintippen.
 - **Standort** (*Optionen → Standort*): An der Arbeit auf „Aktuellen Standort übernehmen“ tippen.
   Radius 150 m ist ein guter Startwert.
-- **NFC** (*Optionen → NFC-Tag*): Einen NFC-Aufkleber (NTAG213/215) besorgen, auf „Umschalten“ tippen
-  und den Aufkleber an das Handy halten. Danach den Aufkleber neben die Stechuhr kleben, aber nur
-  wenn das erlaubt ist.
 - **Kachel** (*Optionen → Kachel & manuell*): „Kachel hinzufügen“ tippen. Von Hand:
   Schnelleinstellungen aufziehen → Stift/Bearbeiten → Kachel „Stempeln“ hinzufügen.
 - Optional: Seitentaste doppelt drücken → App öffnen (*Einstellungen → Erweiterte Funktionen →
@@ -159,11 +134,8 @@ nicht beendet. Sie kann in den App-Benachrichtigungen ausgeblendet werden (Kanal
 - Kotlin, Jetpack Compose, minSdk 29, targetSdk 35
 - WLAN: `ConnectivityManager.NetworkCallback` in einem Foreground-Service (`specialUse`)
 - Standort: Google Play-Dienste Geofencing API
-- NFC: NDEF-Tag mit eigenem MIME-Typ `application/vnd.de.droh.stempeluhr`; Android startet die
-  App direkt beim Scannen
-- Daten: SQLite (`stempel.db`), Export als CSV (Semikolon, UTF-8 mit BOM)
-- Sicherung: eine JSON-Datei; Senden über den Teilen-Dialog (`FileProvider`), Empfangen über
-  „Öffnen mit“ bzw. „Teilen“ (`application/json`)
+- Daten: SQLite (`stempel.db`), Export als CSV (Semikolon, UTF-8 mit BOM), Speichern als Datei oder
+  Senden über den Teilen-Dialog (`FileProvider`)
 - Oberfläche: Material 3 mit eigenem Farbschema (hell/dunkel), Schrift *Plus Jakarta Sans*
   (SIL Open Font License 1.1, siehe `licenses/`), Icons aus *Material Symbols* (Apache 2.0)
 - Reine Logik (Auswertung, Glättung, CSV) in `app/src/main/java/de/droh/stempeluhr/core`, mit

@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-feature android:name="android.hardware.nfc" android:required="false" />
-
-    <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
@@ -14,7 +11,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"
@@ -31,37 +27,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- Sicherung vom alten Handy: empfangene Datei antippen ("Öffnen mit") … -->
-            <intent-filter android:label="@string/open_backup_label">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:mimeType="application/json" />
-            </intent-filter>
-            <!-- … oder aus einer anderen App an die Stempeluhr teilen. -->
-            <intent-filter android:label="@string/open_backup_label">
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/json" />
-            </intent-filter>
-        </activity>
-
-        <!-- Wird beim Scannen eines Stempeluhr-NFC-Tags gestartet (ohne sichtbares Fenster). -->
-        <activity
-            android:name=".nfc.NfcStampActivity"
-            android:excludeFromRecents="true"
-            android:exported="true"
-            android:launchMode="singleInstance"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
-                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/vnd.de.droh.stempeluhr" />
             </intent-filter>
         </activity>
 
@@ -85,7 +50,7 @@
             </intent-filter>
         </service>
 
-        <!-- Gibt die erstellte Sicherung per content://-Adresse an den Teilen-Dialog weiter. -->
+        <!-- Gibt einen CSV-Export per content://-Adresse an den Teilen-Dialog weiter. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

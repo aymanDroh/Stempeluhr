@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import de.droh.stempeluhr.core.AutoState
 import de.droh.stempeluhr.core.EvalOptions
-import de.droh.stempeluhr.core.PrefValue
+import de.droh.stempeluhr.core.MonthFold
 import de.droh.stempeluhr.core.StudentRule
 import de.droh.stempeluhr.core.StampSource
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,11 +62,6 @@ class Settings private constructor(context: Context) {
     var geoRadius: Int
         get() = prefs.getInt("geo_radius", 150)
         set(v) = edit { putInt("geo_radius", v) }
-
-    // ---------- NFC ----------
-    var nfcEnabled: Boolean
-        get() = prefs.getBoolean("nfc_enabled", true)
-        set(v) = edit { putBoolean("nfc_enabled", v) }
 
     // ---------- Allgemein ----------
     /** Verzögerung in Minuten, bevor ein "weg" von WLAN/Geofence als Gehen gilt. */
@@ -136,62 +131,16 @@ class Settings private constructor(context: Context) {
         get() = prefs.getBoolean("show_deleted", false)
         set(v) = edit { putBoolean("show_deleted", v) }
 
+    /** Im Verlauf selbst auf- oder zugeklappte Monate (true = zugeklappt); bleibt über App-Starts hinweg erhalten. */
+    var monthFolds: Map<YearMonth, Boolean>
+        get() = MonthFold.parse(prefs.getStringSet("month_folds", emptySet()).orEmpty())
+        set(v) = edit { putStringSet("month_folds", MonthFold.format(v)) }
+
     // ---------- Darstellung ----------
     /** Helles oder dunkles Design: "system" (wie das Handy), "light" oder "dark". */
     var themeMode: String
         get() = prefs.getString("theme_mode", THEME_SYSTEM).takeIf { it in THEME_MODES } ?: THEME_SYSTEM
         set(v) = edit { putString("theme_mode", if (v in THEME_MODES) v else THEME_SYSTEM) }
-
-    // ---------- Sicherung (Umzug auf ein anderes Handy) ----------
-
-    /** Alle gespeicherten Einstellungen für die Sicherung. Der Zustand der automatischen Quellen gehört nicht dazu. */
-    fun exportPrefs(): Map<String, PrefValue> {
-        val stored = prefs.all
-        return buildMap {
-            for ((key, spec) in BACKUP_PREFS) {
-                val value: PrefValue? = when (val raw = stored[key]) {
-                    is Boolean -> PrefValue.Bool(raw)
-                    is Int -> PrefValue.Number(raw)
-                    is String -> PrefValue.Text(raw)
-                    is Set<*> -> PrefValue.TextSet(raw.filterIsInstance<String>().toSet())
-                    else -> null
-                }
-                if (value != null && spec.accepts(value)) put(key, value)
-            }
-        }
-    }
-
-    /**
-     * Übernimmt die Einstellungen aus einer Sicherung, so dass dieses Handy danach wie das alte eingestellt ist:
-     * Bekannte Einstellungen werden ersetzt; was in der Sicherung fehlt oder ungültig ist, fällt auf den
-     * Standardwert zurück. Bestätigte Abgleiche werden zusammengeführt statt ersetzt.
-     * @return Anzahl der übernommenen Werte.
-     */
-    fun importPrefs(values: Map<String, PrefValue>): Int {
-        var applied = 0
-        val confirmedHere = confirmedReconciles
-        edit {
-            for ((key, spec) in BACKUP_PREFS) {
-                val value = values[key]?.takeIf { spec.accepts(it) }
-                if (key == KEY_CONFIRMED) {
-                    // Zusammenführen: Was hier schon bestätigt ist, bleibt; fehlende Monate kommen dazu.
-                    val fromBackup = parseConfirmed((value as? PrefValue.TextSet)?.value.orEmpty())
-                    putStringSet(key, formatConfirmed(fromBackup + confirmedHere))
-                    if (fromBackup.isNotEmpty()) applied++
-                    continue
-                }
-                when (value) {
-                    null -> remove(key)
-                    is PrefValue.Bool -> putBoolean(key, value.value)
-                    is PrefValue.Number -> putInt(key, value.value)
-                    is PrefValue.Text -> putString(key, value.value)
-                    is PrefValue.TextSet -> putStringSet(key, value.value)
-                }
-                if (value != null) applied++
-            }
-        }
-        return applied
-    }
 
     // ---------- Zustand der automatischen Quellen ----------
     fun autoState(source: StampSource): AutoState = AutoState(
@@ -207,11 +156,6 @@ class Settings private constructor(context: Context) {
         _stateChanges.value = _stateChanges.value + 1
     }
 
-    /** Welche Werte eine Einstellung in einer Sicherung haben darf. */
-    private fun interface PrefSpec {
-        fun accepts(value: PrefValue): Boolean
-    }
-
     companion object {
         const val THEME_SYSTEM = "system"
         const val THEME_LIGHT = "light"
@@ -219,38 +163,6 @@ class Settings private constructor(context: Context) {
         private val THEME_MODES = setOf(THEME_SYSTEM, THEME_LIGHT, THEME_DARK)
 
         private const val KEY_CONFIRMED = "confirmed_reconciles"
-
-        private val bool = PrefSpec { it is PrefValue.Bool }
-        private fun number(range: IntRange) = PrefSpec { it is PrefValue.Number && it.value in range }
-        private fun text(valid: (String) -> Boolean) = PrefSpec { it is PrefValue.Text && it.value.length <= 2000 && valid(it.value) }
-        private fun decimal(range: ClosedFloatingPointRange<Double>) = text { v -> v.toDoubleOrNull()?.let { it in range } == true }
-
-        /**
-         * Einstellungen, die in die Sicherung gehören – mit den Grenzen, die auch die Oberfläche einhält.
-         * So kann eine beschädigte oder von Hand geänderte Datei die App nicht in einen ungültigen Zustand bringen.
-         */
-        private val BACKUP_PREFS: Map<String, PrefSpec> = linkedMapOf(
-            "wifi_enabled" to bool,
-            "wifi_ssids" to text { true },
-            "geo_enabled" to bool,
-            "geo_lat" to decimal(-90.0..90.0),
-            "geo_lon" to decimal(-180.0..180.0),
-            "geo_radius" to number(50..5000),
-            "nfc_enabled" to bool,
-            "leave_delay_min" to number(0..120),
-            "priority" to text { true },
-            "target_minutes" to number(0..24 * 60),
-            "notify_on_stamp" to bool,
-            "prefer_import" to bool,
-            "count_absence" to bool,
-            "reconcile_tolerance_min" to number(0..120),
-            KEY_CONFIRMED to PrefSpec { it is PrefValue.TextSet },
-            "student_enabled" to bool,
-            "student_limit_weeks" to number(1..52),
-            "student_limit_minutes" to number(60..7 * 24 * 60),
-            "show_deleted" to bool,
-            "theme_mode" to text { it in THEME_MODES },
-        )
 
         private fun parseConfirmed(entries: Set<String>): Map<YearMonth, String> = entries.mapNotNull { e ->
             val parts = e.split('=', limit = 2)

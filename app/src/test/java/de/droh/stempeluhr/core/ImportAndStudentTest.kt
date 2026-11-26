@@ -133,6 +133,40 @@ class ImportAndStudentTest {
     }
 
     @Test
+    fun rohdatenWerdenSekundengenauWiedererkannt() {
+        // Die CSV-Datei enthält keine Millisekunden – ein erneuter Import darf trotzdem nichts doppelt anlegen.
+        val t = LocalDateTime.of(2026, 10, 5, 8, 0, 12).atZone(zone).toInstant().toEpochMilli() + 734
+        val events = listOf(
+            StampEvent(1, t, StampType.IN, StampSource.WLAN, null, t, null, false),
+            StampEvent(2, t + 8 * 3_600_000L, StampType.OUT, StampSource.NFC, null, t, null, false),
+        )
+        val existing = events.map { EventKey.of(it.ts, it.type, it.source) }.toSet()
+        val rows = ImportParser.parse(CsvExport.rawEvents(events, zone), zone).rawRows
+        assertEquals(2, rows.size)
+        assertTrue(rows.all { EventKey.of(it.ts, it.type, it.source) in existing })
+        // Gleiche Sekunde, aber andere Art oder Quelle ist ein eigenes Ereignis.
+        assertFalse(EventKey.of(t, StampType.OUT, StampSource.WLAN) in existing)
+        assertFalse(EventKey.of(t, StampType.IN, StampSource.MANUELL) in existing)
+        assertFalse(EventKey.of(t + 1000, StampType.IN, StampSource.WLAN) in existing)
+    }
+
+    @Test
+    fun monateImVerlaufAufUndZuklappen() {
+        val oct = YearMonth.of(2026, 10)
+        val nov = YearMonth.of(2026, 11)
+        // Ohne eigene Wahl: nur der neueste Monat ist aufgeklappt.
+        assertFalse(MonthFold.isCollapsed(nov, nov, emptyMap()))
+        assertTrue(MonthFold.isCollapsed(oct, nov, emptyMap()))
+        // Die eigene Wahl gilt – auch für den neuesten Monat – und übersteht das Speichern.
+        val choices = MonthFold.parse(MonthFold.format(mapOf(oct to false, nov to true)) + "kaputt")
+        assertEquals(mapOf(oct to false, nov to true), choices)
+        assertFalse(MonthFold.isCollapsed(oct, nov, choices))
+        assertTrue(MonthFold.isCollapsed(nov, nov, choices))
+        assertTrue(MonthFold.all(listOf(oct, nov), collapsed = true).values.all { it })
+        assertFalse(MonthFold.all(listOf(oct, nov), collapsed = false).values.any { it })
+    }
+
+    @Test
     fun unvollstaendigeTageWerdenMarkiert() {
         val date = LocalDate.of(2026, 10, 5)
         val t = date.atTime(8, 0).atZone(zone).toInstant().toEpochMilli()

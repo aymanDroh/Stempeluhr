@@ -9,7 +9,7 @@ import de.droh.stempeluhr.engine.StampEngine
 
 /**
  * Kachel in den Schnelleinstellungen: ein Tipp stempelt manuell Kommen bzw. Gehen
- * (je nach letztem NFC-/Manuell-Eintrag des Tages). Funktioniert auch auf dem Sperrbildschirm.
+ * (je nach letztem manuellen Eintrag des Tages). Funktioniert auch auf dem Sperrbildschirm.
  */
 class StampTileService : TileService() {
 

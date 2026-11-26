@@ -6,31 +6,15 @@ import android.provider.OpenableColumns
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
-import de.droh.stempeluhr.core.Backup
-import de.droh.stempeluhr.core.BackupData
-import de.droh.stempeluhr.core.ImportParser
-import de.droh.stempeluhr.core.ImportResult
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
-import java.time.ZoneId
 
-/** Was in einer gewählten Datei steckt. */
-sealed interface ImportedFile {
-    val fileName: String
-
-    /** Vollständige Sicherung eines anderen Handys. */
-    data class BackupFile(override val fileName: String, val data: BackupData) : ImportedFile
-
-    /** Stundenzettel (PDF/CSV) oder Rohdaten-Export (CSV). */
-    data class Times(override val fileName: String, val result: ImportResult) : ImportedFile
-}
-
-/** Liest eine vom Nutzer gewählte Datei (Sicherung, PDF, CSV oder Text) ein. */
+/** Liest eine vom Nutzer gewählte Datei (PDF, CSV oder Text) als Text ein. */
 object ImportReader {
-    /** Mehr braucht keine Sicherung und kein Stundenzettel – schützt vor versehentlich gewählten Riesendateien. */
+    /** Mehr braucht kein Stundenzettel – schützt vor versehentlich gewählten Riesendateien. */
     private const val MAX_BYTES = 40 * 1024 * 1024
 
     fun fileName(context: Context, uri: Uri): String = runCatching {
@@ -38,20 +22,6 @@ object ImportReader {
             if (c.moveToFirst()) c.getString(0) else null
         }
     }.getOrNull() ?: uri.lastPathSegment.orEmpty()
-
-    /**
-     * Erkennt selbst, um welche Art Datei es sich handelt. Läuft im Hintergrund-Thread.
-     * @throws de.droh.stempeluhr.core.BackupFormatException wenn eine Sicherung nicht lesbar ist.
-     */
-    fun read(context: Context, uri: Uri, zone: ZoneId): ImportedFile {
-        val name = fileName(context, uri)
-        val text = readText(context, uri)
-        return if (Backup.looksLikeBackup(text)) {
-            ImportedFile.BackupFile(name, Backup.decode(text))
-        } else {
-            ImportedFile.Times(name, ImportParser.parse(text, zone))
-        }
-    }
 
     /** Läuft im Hintergrund-Thread. */
     fun readText(context: Context, uri: Uri): String {

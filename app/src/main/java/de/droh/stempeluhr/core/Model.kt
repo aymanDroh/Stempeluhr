@@ -8,6 +8,7 @@ enum class StampType(val label: String) {
 
 /** Woher ein Ereignis stammt. */
 enum class StampSource(val label: String, val automatic: Boolean) {
+    /** Wird nicht mehr erfasst; bleibt, damit ältere Einträge und Rohdaten-Exporte lesbar sind. */
     NFC("NFC", false),
     WLAN("WLAN", true),
     GEOFENCE("Geofence", true),
@@ -43,4 +44,14 @@ data class StampEvent(
     val deleted: Boolean,
 ) {
     val edited: Boolean get() = originalTs != null && originalTs != ts
+}
+
+/**
+ * Woran ein Ereignis beim Wiederherstellen aus dem Rohdaten-Export wiedererkannt wird: Sekunde, Art und Quelle.
+ * Sekundengenau, weil die CSV-Datei keine Millisekunden enthält.
+ */
+data class EventKey(val second: Long, val type: StampType, val source: StampSource) {
+    companion object {
+        fun of(ts: Long, type: StampType, source: StampSource) = EventKey(Math.floorDiv(ts, 1000L), type, source)
+    }
 }
